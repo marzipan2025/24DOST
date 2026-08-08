@@ -25,6 +25,17 @@ private enum SettingsFont {
     static func bold(_ size: CGFloat) -> Font {
         .custom("BPdotsUnicase-Bold", size: size)
     }
+
+    /// 타이틀(탭 제목·섹션 제목)을 뺀 나머지 본문. 코레일체 Light.
+    ///
+    /// BPdots 는 유니케이스라 같은 포인트에서 글자가 훨씬 작게 그려진다 — 100pt 에서
+    /// 잉크 높이가 BPdots 47.5, 코레일 87.4 로 1.8배 차이다. 그래서 호출부의 크기를
+    /// 그대로 쓰면 본문만 확 커져 레이아웃이 무너진다. 기하학적으로 맞추려면 0.54 인데
+    /// 그러면 한글이 읽기 힘들 만큼 작아져서, 자막에서 눈으로 맞췄던 비율에 가깝게 잡았다.
+    static func body(_ size: CGFloat) -> Font {
+        .custom("KorailL", size: size * bodyScale)
+    }
+    private static let bodyScale: CGFloat = 0.8
 }
 
 private struct SettingsWindowConfigurator: NSViewRepresentable {
@@ -110,7 +121,7 @@ struct SettingsWindowView: View {
                         selectedTab = tab
                     } label: {
                         Text(tab.rawValue)
-                            .font(SettingsFont.regular(16))
+                            .font(SettingsFont.body(16))
                             .foregroundStyle(selectedTab == tab ? accentColor : settingsInactiveText)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.leading, 10)
@@ -142,7 +153,7 @@ struct SettingsWindowView: View {
                         .foregroundStyle(accentColor)
 
                     Text(tab.subtitle)
-                        .font(SettingsFont.light(14))
+                        .font(SettingsFont.body(14))
                         .foregroundStyle(.secondary)
                 }
                 .padding(.top, 6)
@@ -261,11 +272,11 @@ struct SettingsRow<Content: View>: View {
             HStack(alignment: .center, spacing: 14) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(label)
-                        .font(SettingsFont.light(16))
+                        .font(SettingsFont.body(16))
                         .foregroundStyle(settingsRowText)
                     if let caption {
                         Text(caption)
-                            .font(SettingsFont.light(12))
+                            .font(SettingsFont.body(12))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -301,7 +312,7 @@ struct OnOffToggle: View {
                 Text("OFF")
                     .foregroundStyle(isOn ? settingsInactiveText : Color.white.opacity(0.75))
             }
-            .font(SettingsFont.bold(16))
+            .font(SettingsFont.body(16))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -363,7 +374,7 @@ struct GeneralSettingsView: View {
 
             VStack(alignment: .leading, spacing: 18) {
                 Text("This will permanently clear preferences, history, cache, and remembered app state. It cannot be undone.")
-                    .font(SettingsFont.regular(14))
+                    .font(SettingsFont.body(14))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -409,7 +420,7 @@ struct GeneralSettingsView: View {
     private var softwareUpdateSection: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(updateStatusText)
-                .font(SettingsFont.regular(14))
+                .font(SettingsFont.body(14))
                 .foregroundStyle(updateStatusColor)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -490,7 +501,7 @@ private struct SettingsFooterButtonLabel: View {
 
     var body: some View {
         Text(title)
-            .font(SettingsFont.regular(14))
+            .font(SettingsFont.body(14))
             .foregroundStyle(foregroundColor)
             .offset(y: -2)
             .padding(.horizontal, 16)
@@ -553,13 +564,13 @@ private struct ShortcutRow: View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 16) {
                 Text(item.action)
-                    .font(SettingsFont.light(16))
+                    .font(SettingsFont.body(16))
                     .foregroundStyle(settingsRowText)
 
                 Spacer()
 
                 Text(item.input)
-                    .font(SettingsFont.regular(13))
+                    .font(SettingsFont.body(13))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)
             }
@@ -650,14 +661,14 @@ struct LicencesSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(Self.licenseText)
-                .font(SettingsFont.regular(13))
+                .font(SettingsFont.body(13))
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 2)
 
             Link(Self.repositoryURL.absoluteString, destination: Self.repositoryURL)
-                .font(SettingsFont.regular(13))
+                .font(SettingsFont.body(13))
                 .foregroundStyle(.blue)
                 .padding(.top, 2)
                 .padding(.leading, 2)
@@ -974,14 +985,25 @@ struct SettingsMenuPicker: View {
                 Button(option.label) { selection = option.value }
             }
         } label: {
-            HStack(spacing: 5) {
+            // Software Update 의 Check for Update 버튼과 같은 생김새.
+            HStack(spacing: 6) {
                 Text(currentLabel)
-                    .font(SettingsFont.bold(16))
-                    .foregroundStyle(AppAccentColor.choice(for: accentColorRaw).color)
+                    .font(SettingsFont.body(14))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(settingsInactiveText)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(settingsPanelStroke, lineWidth: 0.5)
             }
             .contentShape(Rectangle())
         }
@@ -1039,7 +1061,7 @@ struct SubtitleSettingsView: View {
                             showDivider: false) {
                     HStack(spacing: 10) {
                         Text("\(Int(lookAhead))s")
-                            .font(SettingsFont.bold(16))
+                            .font(SettingsFont.body(16))
                             .foregroundStyle(accentColor)
                             .monospacedDigit()
                         Stepper("", value: $lookAhead, in: 5...90, step: 5).labelsHidden()
@@ -1068,7 +1090,7 @@ struct SubtitleSettingsView: View {
                         HStack(spacing: 8) {
                             SecureField(apiKeySaved ? "••••••••••••" : "sk-ant-…", text: $apiKeyDraft)
                                 .textFieldStyle(.plain)
-                                .font(SettingsFont.regular(13))
+                                .font(SettingsFont.body(13))
                                 .padding(.horizontal, 9)
                                 .padding(.vertical, 6)
                                 .background(Color.white.opacity(0.06),
@@ -1084,7 +1106,7 @@ struct SubtitleSettingsView: View {
                                     apiKeyDraft = ""
                                 }
                             }
-                            .font(SettingsFont.bold(15))
+                            .font(SettingsFont.body(15))
                             .foregroundStyle(accentColor)
                             .buttonStyle(.plain)
                         }
@@ -1092,7 +1114,7 @@ struct SubtitleSettingsView: View {
                 } else {
                     SettingsRow("Model", showDivider: false) {
                         Text("System")
-                            .font(SettingsFont.bold(16))
+                            .font(SettingsFont.body(16))
                             .foregroundStyle(settingsInactiveText)
                     }
                 }
@@ -1104,7 +1126,8 @@ struct SubtitleSettingsView: View {
     /// 시스템이 실제로 인식할 수 있는 언어만 고르게 한다.
     private func loadSupportedLocales() async {
         let locales = await SpeechTranscriber.supportedLocales
-        let display = Locale.current
+        // 시스템 언어가 아니라 영어로 이름을 뽑는다 (targetLanguages 와 같은 이유).
+        let display = Locale(identifier: "en_US")
         var options: [(value: String, label: String)] = [("auto", "Auto")]
         options += locales
             .map { locale -> (String, String) in
@@ -1115,12 +1138,14 @@ struct SubtitleSettingsView: View {
         await MainActor.run { supportedSourceLocales = options }
     }
 
+    /// 라벨은 각 언어의 자칭이 아니라 전부 영어로 쓴다 — 설정창 UI 가 영어라
+    /// 목록만 여러 문자 체계가 섞이면 읽기 어렵고, 코레일체에 없는 글리프도 나온다.
     private static let targetLanguages: [(value: String, label: String)] = [
-        ("ko", "한국어"), ("en", "English"), ("ja", "日本語"),
-        ("zh-Hans", "简体中文"), ("zh-Hant", "繁體中文"),
-        ("es", "Español"), ("fr", "Français"), ("de", "Deutsch"),
-        ("it", "Italiano"), ("pt", "Português"), ("ru", "Русский"),
-        ("ar", "العربية"), ("hi", "हिन्दी"), ("th", "ไทย"), ("vi", "Tiếng Việt")
+        ("ko", "Korean"), ("en", "English"), ("ja", "Japanese"),
+        ("zh-Hans", "Chinese (Simplified)"), ("zh-Hant", "Chinese (Traditional)"),
+        ("es", "Spanish"), ("fr", "French"), ("de", "German"),
+        ("it", "Italian"), ("pt", "Portuguese"), ("ru", "Russian"),
+        ("ar", "Arabic"), ("hi", "Hindi"), ("th", "Thai"), ("vi", "Vietnamese")
     ]
 
     private static let claudeModels: [(value: String, label: String)] = [
