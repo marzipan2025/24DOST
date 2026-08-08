@@ -303,9 +303,9 @@ struct SubtitleTypeface {
 /// 코레일 Light "한글자막" 87.4). 그런데 그 값은 눈으로 보면 한글이 작고 답답하다 —
 /// 한글은 획이 조밀해서 같은 높이라도 라틴 대문자보다 작게 읽히고, BPdots 쪽은
 /// 도트 매트릭스라 글자가 두툼해 더 커 보인다. 그래서 기하학적 일치보다 위로 올려 잡았다.
-/// 실제 값은 화면에서 보고 맞춘 것 — 기하학적 일치의 1.25배다.
+/// 실제 값은 화면에서 보고 맞춘 것 — 기하학적 일치의 1.38배다.
 /// 재보고 싶으면 CTLineGetBoundsWithOptions(.useGlyphPathBounds).
-private let hangulSubtitleScale: CGFloat = 0.68
+private let hangulSubtitleScale: CGFloat = 0.75
 
 private func subtitleTypeface(for text: String, baseSize: CGFloat) -> SubtitleTypeface {
     let lineHeight = baseSize * 1.08
@@ -640,7 +640,7 @@ private func computeURLInputGeometry(
     }
 }
 
-/// 대기 화면 "Update →" 화살표의 클릭 히트박스 rect. nil 이면 앵커를 찾지 못한 것.
+/// 대기 화면 "Update »" 의 클릭 히트박스 rect. nil 이면 앵커를 찾지 못한 것.
 /// 렌더 쪽(draw)과 동일하게 bottom-left 앵커 + "Update" 폭 기준으로 계산한다.
 @MainActor
 private func computeUpdateArrowGeometry(
@@ -667,8 +667,10 @@ private func computeUpdateArrowGeometry(
         .size(withAttributes: [.font: nsFont]).width
     let textRect = CGRect(x: anchorLeft, y: anchorBottom - lineH,
                           width: textWidth, height: lineH)
-    // 화살표는 작은 타겟이라 히트박스는 주변까지 여유 있게 잡는다.
-    return updateArrowFrame(afterTextRect: textRect, fontSize: fontSize)
+    // "Update" 글자와 화살표를 통째로 히트박스로 잡는다. 화살표만 잡아 두면
+    // 글자를 누른 클릭이 배경으로 흘러가 직전 영상이 재생돼 버린다.
+    let arrowRect = updateArrowFrame(afterTextRect: textRect, fontSize: fontSize)
+    return textRect.union(arrowRect)
         .insetBy(dx: -fontSize * 0.35, dy: -fontSize * 0.2)
 }
 
@@ -696,7 +698,7 @@ private struct DotsOverlayView: View {
     /// 피크 중엔 도트를 전부 스킵(실제 영상이 뒤에서 보이도록). 자막/레이블은 그대로 렌더.
     let isPeeking: Bool
     let accentColor: Color
-    /// 새 릴리스가 있으면 그 버전 문자열. 대기 화면 "04Dopl"이 업데이트 표기로 바뀐다.
+    /// 새 릴리스가 있으면 그 버전 문자열. 대기 화면 "24Dost"가 업데이트 표기로 바뀐다.
     let updateAvailableVersion: String?
 
     var body: some View {
@@ -773,7 +775,7 @@ private struct DotsOverlayView: View {
             overlayIsSubtitle = false
             preserveLineBreaks = false
         } else if isPlaceholder {
-            overlayRawText = updateAvailableVersion == nil ? "04Dopl" : updatePlaceholderLabel
+            overlayRawText = updateAvailableVersion == nil ? "24Dost" : updatePlaceholderLabel
             overlayIsSubtitle = false
             preserveLineBreaks = false
         } else if sampler.hasSubtitles && sampler.showSubtitles && !sampler.currentSubtitle.isEmpty {
@@ -1373,7 +1375,7 @@ struct ContentView: View {
     @State private var playlistIndex: Int = 0
 
     // 런칭 시 GitHub 최신 릴리스 조회 결과. 새 버전이 있으면 대기 화면
-    // 플레이스홀더("04Dopl")가 업데이트 표기로 바뀐다.
+    // 플레이스홀더("24Dost")가 업데이트 표기로 바뀐다.
     @State private var updateAvailableVersion: String? = nil
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     @AppStorage("tapToPeek") private var tapToPeek = false
@@ -1737,7 +1739,7 @@ struct ContentView: View {
                 }
             }
 
-            // 대기 화면 "Update →" 화살표 클릭 히트박스.
+            // 대기 화면 "Update »" 클릭 히트박스 (글자와 화살표 모두).
             if isStandby, updateAvailableVersion != nil {
                 GeometryReader { geo in
                     updateArrowHitArea(size: geo.size)
@@ -1974,7 +1976,7 @@ struct ContentView: View {
 
     // MARK: URL 편집 오버레이 / 커밋·취소
 
-    /// 대기 화면 업데이트 화살표 히트박스. 클릭하면 설정 창 Software Update 섹션을 연다.
+    /// 대기 화면 "Update »" 히트박스(글자+화살표). 클릭하면 설정 창 Software Update 섹션을 연다.
     @ViewBuilder
     private func updateArrowHitArea(size: CGSize) -> some View {
         if let rect = computeUpdateArrowGeometry(
