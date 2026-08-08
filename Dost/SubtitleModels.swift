@@ -10,12 +10,26 @@ struct SubtitleCue: Equatable, Sendable, Codable {
     var text: String
     /// 인식된 원문. 번역 전이거나 번역이 필요 없으면 text 와 동일.
     var sourceText: String
+    /// 짧은 창(급했을 때)으로 만들어졌는지. 긴 창으로 다시 만들면 false 가 된다.
+    /// 진단용 표시에 쓴다 — 옛 캐시에는 없으므로 옵셔널로 읽고 기본은 false.
+    var isCoarse: Bool
 
-    init(start: TimeInterval, end: TimeInterval, text: String, sourceText: String? = nil) {
+    init(start: TimeInterval, end: TimeInterval, text: String,
+         sourceText: String? = nil, isCoarse: Bool = false) {
         self.start = start
         self.end = end
         self.text = text
         self.sourceText = sourceText ?? text
+        self.isCoarse = isCoarse
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        start = try c.decode(TimeInterval.self, forKey: .start)
+        end = try c.decode(TimeInterval.self, forKey: .end)
+        text = try c.decode(String.self, forKey: .text)
+        sourceText = try c.decodeIfPresent(String.self, forKey: .sourceText) ?? text
+        isCoarse = try c.decodeIfPresent(Bool.self, forKey: .isCoarse) ?? false
     }
 }
 

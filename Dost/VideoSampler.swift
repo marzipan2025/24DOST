@@ -117,6 +117,8 @@ class VideoSampler: ObservableObject {
     @Published var hasSubtitles: Bool = false
     @Published var showSubtitles: Bool = true
     @Published var currentSubtitle: String = ""
+    /// 지금 보이는 자막이 짧은 창으로 만들어진 것인지. 진단 표시용.
+    @Published var currentSubtitleIsCoarse: Bool = false
     @Published var hasExternalSubtitle: Bool = false
     private enum SubtitleMode: Equatable {
         case off
@@ -636,7 +638,9 @@ class VideoSampler: ObservableObject {
             DostLog.log("updateGenerated: showSubtitles=false")
             return
         }
-        let text = generator.cues.cue(at: seconds)?.text ?? ""
+        let cue = generator.cues.cue(at: seconds)
+        let text = cue?.text ?? ""
+        currentSubtitleIsCoarse = cue?.isCoarse ?? false
         if currentSubtitle != text {
             DostLog.log(String(format: "cue @%.1fs hasSub=%@ show=%@ -> %@", seconds,
                                hasSubtitles ? "Y" : "N", showSubtitles ? "Y" : "N",

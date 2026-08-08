@@ -949,7 +949,10 @@ private struct DotsOverlayView: View {
                     ? Color(red: 201/255, green: 207/255, blue: 229/255)
                     : fixedOverlayColor
             } else if !adaptiveSubtitleColor {
-                overlayColor = fixedOverlayColor
+                // 진단 표시: Adaptive Subtitle Color 를 끄면 자막을 만든 창 길이가 색으로
+                // 드러난다. 긴 창(180초)으로 만든 줄은 악센트 색, 짧은 창(60초)으로 급히
+                // 만든 줄은 평소 색. 정교화가 진행될수록 악센트 색이 늘어난다.
+                overlayColor = sampler.currentSubtitleIsCoarse ? fixedOverlayColor : accentColor
             } else {
                 overlayColor = adaptiveColor(sR: sampR, sG: sampG, sB: sampB, n: sampN,
                                              brightMode: brightTextMode)
