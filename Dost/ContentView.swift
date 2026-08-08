@@ -299,11 +299,14 @@ struct SubtitleTypeface {
 
 /// 한글은 획이 조밀해서 작은 크기에 Bold 를 쓰면 뭉개지므로 SemiBold 까지만 올린다.
 /// 웨이트 전환 기준은 BPdots 와 같은 비율(42/30)을 축소 배율에 맞춰 옮긴 값.
-/// 한글을 BPdots 라틴 글자와 같은 높이로 보이게 하는 배율.
-/// 감으로 고른 값이 아니라 실측값이다 — 100pt 에서 두 폰트가 실제로 칠하는 잉크 높이가
-/// BPdots "HELLO" 47.5, Interop "한글자막" 84.5 이라 47.5/84.5 ≈ 0.56.
-/// 폰트를 바꾸면 CTLineGetBoundsWithOptions(.useGlyphPathBounds) 로 다시 재면 된다.
-private let hangulSubtitleScale: CGFloat = 0.56
+/// 한글 자막을 BPdots 자막 옆에 놓았을 때 비슷한 크기로 읽히게 하는 배율.
+///
+/// 잉크 높이를 실제로 재면 0.56 에서 정확히 같아진다 (100pt 에서 BPdots "HELLO" 47.5,
+/// Interop "한글자막" 84.5). 그런데 그 값은 눈으로 보면 한글이 작고 답답하다 —
+/// 한글은 획이 조밀해서 같은 높이라도 라틴 대문자보다 작게 읽히고, BPdots 쪽은
+/// 도트 매트릭스라 글자가 두툼해 더 커 보인다. 그래서 기하학적 일치보다 위로 올려 잡았다.
+/// 재보고 싶으면 CTLineGetBoundsWithOptions(.useGlyphPathBounds).
+private let hangulSubtitleScale: CGFloat = 0.75
 
 private func subtitleTypeface(for text: String, baseSize: CGFloat) -> SubtitleTypeface {
     let lineHeight = baseSize * 1.08
