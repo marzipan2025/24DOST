@@ -291,26 +291,37 @@ struct SubtitleTypeface {
         NSFont(name: fontName, size: size) ?? NSFont.boldSystemFont(ofSize: size)
     }
 
-    /// 줄 상자 안에서 글자를 수직 중앙에 놓기 위한 오프셋.
-    var verticalOffset: CGFloat { max(0, (lineHeight - size * 1.08) / 2) }
+    /// 그릴 때 위에서 얼마나 내릴지. BPdots 였다면 베이스라인이 놓였을 자리에
+    /// 이 폰트의 베이스라인을 맞추기 위한 값이다. 상자 중앙에 놓으면 자막 소스가
+    /// 바뀔 때마다 글자가 위아래로 튄다.
+    let baselineOffset: CGFloat
 }
 
 /// 한글은 획이 조밀해서 작은 크기에 Bold 를 쓰면 뭉개지므로 SemiBold 까지만 올린다.
 /// 웨이트 전환 기준은 BPdots 와 같은 비율(42/30)을 축소 배율에 맞춰 옮긴 값.
-private let hangulSubtitleScale: CGFloat = 0.75
+/// 한글을 BPdots 라틴 글자와 같은 높이로 보이게 하는 배율.
+/// 감으로 고른 값이 아니라 실측값이다 — 100pt 에서 두 폰트가 실제로 칠하는 잉크 높이가
+/// BPdots "HELLO" 47.5, Interop "한글자막" 84.5 이라 47.5/84.5 ≈ 0.56.
+/// 폰트를 바꾸면 CTLineGetBoundsWithOptions(.useGlyphPathBounds) 로 다시 재면 된다.
+private let hangulSubtitleScale: CGFloat = 0.56
 
 private func subtitleTypeface(for text: String, baseSize: CGFloat) -> SubtitleTypeface {
     let lineHeight = baseSize * 1.08
+    let dotName = dotsFontName(forSize: baseSize)
     guard containsHangul(text) else {
-        return SubtitleTypeface(fontName: dotsFontName(forSize: baseSize),
-                                size: baseSize, lineHeight: lineHeight)
+        return SubtitleTypeface(fontName: dotName, size: baseSize,
+                                lineHeight: lineHeight, baselineOffset: 0)
     }
     let size = baseSize * hangulSubtitleScale
     let name: String
     if size >= 42 * hangulSubtitleScale { name = "Interop-Light" }
     else if size >= 30 * hangulSubtitleScale { name = "Interop-Regular" }
     else { name = "Interop-SemiBold" }
-    return SubtitleTypeface(fontName: name, size: size, lineHeight: lineHeight)
+    // BPdots 였다면 베이스라인이 놓였을 자리에 맞춘다. 두 폰트의 ascender 차이만큼 내린다.
+    let dotAscender = NSFont(name: dotName, size: baseSize)?.ascender ?? baseSize
+    let hangulAscender = NSFont(name: name, size: size)?.ascender ?? size
+    return SubtitleTypeface(fontName: name, size: size, lineHeight: lineHeight,
+                            baselineOffset: dotAscender - hangulAscender)
 }
 
 /// 대기 화면 업데이트 안내 레이블. 화살표는 BPdots에 있는 "»" 글리프를 악센트 색으로 렌더.
@@ -920,8 +931,8 @@ private struct DotsOverlayView: View {
                 let n = max(1, subtitleLines.count)
                 // sr 은 라인박스 기준이라 글씨 위 여백이 커서 글씨가 아래로 쏠림.
                 // 실제 잉크 범위(첫 줄 cap-top ~ 마지막 줄 baseline)에 맞춰 캡슐을 수직 중앙 정렬.
-                let inkTop    = sr.minY + bodyFace.verticalOffset + (nsFont.ascender - nsFont.capHeight)
-                let inkBottom = sr.minY + bodyFace.verticalOffset + CGFloat(n - 1) * lineH + nsFont.ascender
+                let inkTop    = sr.minY + bodyFace.baselineOffset + (nsFont.ascender - nsFont.capHeight)
+                let inkBottom = sr.minY + bodyFace.baselineOffset + CGFloat(n - 1) * lineH + nsFont.ascender
                 let inkCenterY = (inkTop + inkBottom) / 2
                 let padX = fontSize * 0.5
                 let padY = fontSize * 0.30
@@ -953,7 +964,7 @@ private struct DotsOverlayView: View {
                 // 줄 상자는 기준 크기로 잡혀 있으므로, 작은 글자는 그 안에서 중앙에 놓는다.
                 context.draw(resolved,
                              at: CGPoint(x: sr.minX,
-                                         y: sr.minY + CGFloat(i) * lineH + bodyFace.verticalOffset),
+                                         y: sr.minY + CGFloat(i) * lineH + bodyFace.baselineOffset),
                              anchor: .topLeading)
             }
         }
