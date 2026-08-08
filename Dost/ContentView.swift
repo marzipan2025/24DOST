@@ -400,11 +400,11 @@ enum FullscreenBackgroundStyle: Int, CaseIterable {
 private func isOverlayDot(
     effect: VideoSampler.OverlayEffect,
     row: Int, col: Int,
-    totalRows: Int, totalCols: Int
+    layout: DotGridLayout
 ) -> Bool {
     switch effect {
     case .none:         return false
-    case .border:       return row == 1 || row == totalRows - 2 || col == 1 || col == totalCols - 2
+    case .border:       return layout.isOutlineDot(row: row, col: col)
     case .row(let n):   return row == n
     case .col(let n):   return col == n
     }
@@ -501,6 +501,24 @@ private struct DotGridLayout {
         if cx < tlX { dx = tlX - cx } else if cx > brX { dx = cx - brX }
         if cy < tlY { dy = tlY - cy } else if cy > brY { dy = cy - brY }
         return dx * dx + dy * dy > innerR2
+    }
+
+    /// 실제로 보이는 영역의 가장 바깥 테두리 도트인지.
+    ///
+    /// 재생/일시정지 테두리를 "행 1, 열 1, 마지막 행, 마지막 열"로 잡으면 안 된다 —
+    /// 간격을 좁히면 inset(30) 안쪽으로 들어온 그 줄이 통째로 마스크돼 사라져서,
+    /// 테두리 깜빡임이 아예 안 보인다. 마스크를 통과한 도트 중 이웃이 마스크됐거나
+    /// 격자 밖인 것을 테두리로 본다. 라운드 모서리도 자연히 따라간다.
+    func isOutlineDot(row: Int, col: Int) -> Bool {
+        let c = center(row: row, col: col)
+        if isCornerMasked(c.x, c.y) { return false }
+        for (dr, dc) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+            let r = row + dr, cc = col + dc
+            if r < 1 || r > totalRows - 2 || cc < 1 || cc > totalCols - 2 { return true }
+            let n = center(row: r, col: cc)
+            if isCornerMasked(n.x, n.y) { return true }
+        }
+        return false
     }
 
     /// 자막 앵커: 최좌하단 visible 도트.
@@ -858,12 +876,31 @@ private struct DotsOverlayView: View {
                     sampN2 += 1
                 }
 
-                // 피크 중엔 실제 영상을 드러내되, 피크 토글을 되돌릴 우상단 도트만 흰색으로 남긴다.
+                // 피크 중엔 실제 영상을 드러내되, 피크 토글을 되돌릴 우상단 도트는 남긴다.
                 // anchor는 동일 레이아웃에서 계산하므로 도트 크기/간격 변화에 그대로 따라간다.
                 if isPeeking {
+                    // 깜빡임이 켜져 있는 동안은 앵커도 같은 색으로 간다. 한계치 알림처럼
+                    // 악센트 색으로 깜빡일 때 앵커만 흰 점으로 남으면 눈에 거슬린다.
+                    let blinkColor = (sampler.overlayIsAlert || !sampler.isPlaying)
+                        ? accentColor : indicatorColorPlay
                     if let peekAnchor, rowIdx == peekAnchor.row, colIdx == peekAnchor.col {
                         let dotRect = CGRect(x: c.x - layout.half, y: c.y - layout.half, width: dotD, height: dotD)
-                        context.fill(Path(ellipseIn: dotRect), with: .color(indicatorColorPlay))
+                        // 깜빡임이 꺼진 위상에서도 앵커는 계속 보여야 한다 — 피크를 되돌릴
+                        // 유일한 표적이라서 사라지면 안 된다.
+                        context.fill(Path(ellipseIn: dotRect),
+                                     with: .color(hasOverlay && isBlinkOn ? blinkColor : indicatorColorPlay))
+                        continue
+                    }
+                    // 볼륨/탐색 직선은 피크 중에도 그린다. 조작은 피크 중에도 먹히는데
+                    // 도트를 통째로 건너뛰면 확인할 방법이 없다.
+                    // 글자 영역은 도트 모드와 똑같이 파낸다 — 안 그러면 재생/일시정지
+                    // 테두리가 좌하단 자막 위에 겹쳐 찍힌다.
+                    if hasOverlay, isBlinkOn,
+                       isOverlayDot(effect: effect, row: rowIdx, col: colIdx, layout: layout),
+                       !shouldHideDot(at: c, rect: subtitleHideRect, half: layout.half),
+                       !shouldHideDot(at: c, rect: rightBlockHideRect, half: layout.half) {
+                        let dotRect = CGRect(x: c.x - layout.half, y: c.y - layout.half, width: dotD, height: dotD)
+                        context.fill(Path(ellipseIn: dotRect), with: .color(blinkColor))
                     }
                     continue
                 }
@@ -875,7 +912,7 @@ private struct DotsOverlayView: View {
                 let dotRect = CGRect(x: c.x - layout.half, y: c.y - layout.half, width: dotD, height: dotD)
                 let color = dotColor(
                     row: rowIdx, col: colIdx, rows: rows, cols: cols,
-                    totalRows: layout.totalRows, totalCols: layout.totalCols,
+                    layout: layout,
                     effect: effect, hasOverlay: hasOverlay, isBlinkOn: isBlinkOn,
                     placeholderColor: placeholderColor
                 )
@@ -1162,15 +1199,14 @@ private struct DotsOverlayView: View {
     /// 특정 위치의 도트 색.
     private func dotColor(
         row: Int, col: Int, rows: Int, cols: Int,
-        totalRows: Int, totalCols: Int,
+        layout: DotGridLayout,
         effect: VideoSampler.OverlayEffect,
         hasOverlay: Bool, isBlinkOn: Bool,
         placeholderColor: Color
     ) -> Color {
         // 오버레이가 켜져 있고 깜빡임 주기라면, 플레이스홀더 여부와 상관없이 오버레이 색상을 우선 반환.
         if hasOverlay && isBlinkOn &&
-            isOverlayDot(effect: effect, row: row, col: col,
-                         totalRows: totalRows, totalCols: totalCols) {
+            isOverlayDot(effect: effect, row: row, col: col, layout: layout) {
             let pause = sampler.overlayIsAlert || !sampler.isPlaying
             return pause ? accentColor : indicatorColorPlay
         }
@@ -1637,7 +1673,9 @@ struct ContentView: View {
                     toggleMainAppFullscreen()
                 },
                 onRightClick: { point in
-                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil || isPeeking { return }
+                    // 피크 중에도 허용 — 세로줄 클릭 탐색은 실제 영상을 보면서 쓸 때 오히려 유용하다.
+                    // (우상단 도트는 피크 토글이라 아래에서 따로 제외한다.)
+                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil { return }
                     if isStandby { return }
                     if sampler.isLoadingMedia || sampler.isStaticContent { return }
                     
@@ -1668,11 +1706,11 @@ struct ContentView: View {
                     }
                 },
                 onScrollUp: {
-                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil || isPeeking { return }
+                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil { return }
                     sampler.volumeUp()
                 },
                 onScrollDown: {
-                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil || isPeeking { return }
+                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil { return }
                     sampler.volumeDown()
                 }
             )
