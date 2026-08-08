@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D100001 /* Interop-Light.otf in Resources */ = {isa = PBXBuildFile; fileRef = D100011 /* Interop-Light.otf */; };
+		D100002 /* Interop-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = D100012 /* Interop-Regular.otf */; };
+		D100003 /* Interop-SemiBold.otf in Resources */ = {isa = PBXBuildFile; fileRef = D100013 /* Interop-SemiBold.otf */; };
 		C100001 /* SubtitleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100011 /* SubtitleModels.swift */; };
 		C100002 /* SubtitleGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100012 /* SubtitleGenerator.swift */; };
 		C100003 /* Transcriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100013 /* Transcriber.swift */; };
@@ -24,6 +27,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		D100011 /* Interop-Light.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Interop-Light.otf"; sourceTree = "<group>"; };
+		D100012 /* Interop-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Interop-Regular.otf"; sourceTree = "<group>"; };
+		D100013 /* Interop-SemiBold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Interop-SemiBold.otf"; sourceTree = "<group>"; };
 		C100011 /* SubtitleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleModels.swift; sourceTree = "<group>"; };
 		C100012 /* SubtitleGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleGenerator.swift; sourceTree = "<group>"; };
 		C100013 /* Transcriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcriber.swift; sourceTree = "<group>"; };
@@ -89,6 +95,9 @@
 				A100017 /* bpdots.unicase-bold.otf */,
 				A10001A /* bpdots.unicase-regular.otf */,
 				A100018 /* bpdots.unicase-light.otf */,
+				D100011 /* Interop-Light.otf */,
+				D100012 /* Interop-Regular.otf */,
+				D100013 /* Interop-SemiBold.otf */,
 			);
 			path = Fonts;
 			sourceTree = "<group>";
@@ -163,6 +172,9 @@
 				A100005 /* bpdots.unicase-bold.otf in Resources */,
 				A100008 /* bpdots.unicase-regular.otf in Resources */,
 				A100006 /* bpdots.unicase-light.otf in Resources */,
+				D100001 /* Interop-Light.otf in Resources */,
+				D100002 /* Interop-Regular.otf in Resources */,
+				D100003 /* Interop-SemiBold.otf in Resources */,
 				A100007 /* Credits.html in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

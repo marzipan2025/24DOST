@@ -259,6 +259,60 @@ private func dotsFontName(forSize size: CGFloat) -> String {
     return "BPdotsUnicase-Bold"
 }
 
+/// 자막에 한글이 한 글자라도 있으면 한글 자막으로 본다.
+/// 완성형 음절 · 자모 · 호환 자모 · 확장 영역을 모두 본다.
+private func containsHangul(_ text: String) -> Bool {
+    text.unicodeScalars.contains { s in
+        (0xAC00...0xD7A3).contains(s.value) ||   // 완성형 음절
+        (0x1100...0x11FF).contains(s.value) ||   // 자모
+        (0x3130...0x318F).contains(s.value) ||   // 호환 자모
+        (0xA960...0xA97F).contains(s.value) ||   // 자모 확장 A
+        (0xD7B0...0xD7FF).contains(s.value)      // 자모 확장 B
+    }
+}
+
+/// 자막 본문을 그릴 폰트와 크기.
+///
+/// BPdots 에는 한글 글리프가 없어서 한글 자막은 시스템 폰트로 폴백되는데,
+/// 그러면 BPdots 기준으로 맞춰 놓은 크기에서 한글만 유난히 크게 나온다.
+/// 그래서 한글이 섞인 자막은 Interop 을 절반 크기로 쓴다.
+/// 측정(줄바꿈·폭)과 렌더가 같은 값을 써야 글자 뒤 도트 숨김 영역이 어긋나지 않으므로,
+/// 폰트 선택은 반드시 이 한 곳을 통한다.
+struct SubtitleTypeface {
+    let fontName: String
+    /// 실제로 그릴 글자 크기.
+    let size: CGFloat
+    /// 줄 상자 높이. **글자 크기와 무관하게 항상 기준 크기로 잡는다.**
+    /// 이 값이 글자 뒤 도트를 비우는 영역의 높이가 되기 때문에, 글자 크기에 비례시키면
+    /// 작은 한글 자막에서 여백만 좁아져 위아래 도트가 글자에 바짝 붙는다.
+    let lineHeight: CGFloat
+
+    var nsFont: NSFont {
+        NSFont(name: fontName, size: size) ?? NSFont.boldSystemFont(ofSize: size)
+    }
+
+    /// 줄 상자 안에서 글자를 수직 중앙에 놓기 위한 오프셋.
+    var verticalOffset: CGFloat { max(0, (lineHeight - size * 1.08) / 2) }
+}
+
+/// 한글은 획이 조밀해서 작은 크기에 Bold 를 쓰면 뭉개지므로 SemiBold 까지만 올린다.
+/// 웨이트 전환 기준은 BPdots 와 같은 비율(42/30)을 축소 배율에 맞춰 옮긴 값.
+private let hangulSubtitleScale: CGFloat = 0.75
+
+private func subtitleTypeface(for text: String, baseSize: CGFloat) -> SubtitleTypeface {
+    let lineHeight = baseSize * 1.08
+    guard containsHangul(text) else {
+        return SubtitleTypeface(fontName: dotsFontName(forSize: baseSize),
+                                size: baseSize, lineHeight: lineHeight)
+    }
+    let size = baseSize * hangulSubtitleScale
+    let name: String
+    if size >= 42 * hangulSubtitleScale { name = "Interop-Light" }
+    else if size >= 30 * hangulSubtitleScale { name = "Interop-Regular" }
+    else { name = "Interop-SemiBold" }
+    return SubtitleTypeface(fontName: name, size: size, lineHeight: lineHeight)
+}
+
 /// 대기 화면 업데이트 안내 레이블. 화살표는 BPdots에 있는 "»" 글리프를 악센트 색으로 렌더.
 /// (BPdots에 "→" 글리프는 없음.)
 private let updatePlaceholderLabel = "Update"
@@ -850,22 +904,24 @@ private struct DotsOverlayView: View {
             overlayColor = .clear
         }
 
-        // 자막/URL 본문 렌더
+        // 자막/URL 본문 렌더.
+        // resolveTextLayout 이 폭을 잴 때 쓴 것과 반드시 같은 폰트여야 한다 —
+        // 어긋나면 글자 뒤 도트가 남거나 과하게 지워진다.
+        let bodyFace = subtitleTypeface(for: overlayRawText, baseSize: sampler.subtitleFontSize)
         if let sr = subtitleRect, !subtitleLines.isEmpty {
             // peek 중 자막 배경 캡슐 색면. 설정 ON + 실제 자막(캡션)일 때만.
             // 텍스트 바로 뒤에 깔리도록 본문 렌더 직전에 그린다.
             let isRealSubtitle = sampler.hasSubtitles && sampler.showSubtitles
                 && !sampler.currentSubtitle.isEmpty
             if isPeeking, subtitleBackdropWhilePeeking, isRealSubtitle {
-                let fontSize = sampler.subtitleFontSize
-                let lineH = fontSize * 1.08
-                let nsFont = NSFont(name: dotsFontName(forSize: fontSize), size: fontSize)
-                    ?? NSFont.boldSystemFont(ofSize: fontSize)
+                let fontSize = bodyFace.size
+                let lineH = bodyFace.lineHeight
+                let nsFont = bodyFace.nsFont
                 let n = max(1, subtitleLines.count)
                 // sr 은 라인박스 기준이라 글씨 위 여백이 커서 글씨가 아래로 쏠림.
                 // 실제 잉크 범위(첫 줄 cap-top ~ 마지막 줄 baseline)에 맞춰 캡슐을 수직 중앙 정렬.
-                let inkTop    = sr.minY + (nsFont.ascender - nsFont.capHeight)
-                let inkBottom = sr.minY + CGFloat(n - 1) * lineH + nsFont.ascender
+                let inkTop    = sr.minY + bodyFace.verticalOffset + (nsFont.ascender - nsFont.capHeight)
+                let inkBottom = sr.minY + bodyFace.verticalOffset + CGFloat(n - 1) * lineH + nsFont.ascender
                 let inkCenterY = (inkTop + inkBottom) / 2
                 let padX = fontSize * 0.5
                 let padY = fontSize * 0.30
@@ -887,15 +943,17 @@ private struct DotsOverlayView: View {
                     with: .color(subtitleBackdropColor(from: overlayColor, scene: sceneColor))
                 )
             }
-            let lineH = sampler.subtitleFontSize * 1.08
+            let lineH = bodyFace.lineHeight
             for (i, line) in subtitleLines.enumerated() {
                 let resolved = context.resolve(
                     Text(line)
-                        .font(.custom(dotsFontName(forSize: sampler.subtitleFontSize), size: sampler.subtitleFontSize))
+                        .font(.custom(bodyFace.fontName, size: bodyFace.size))
                         .foregroundColor(overlayColor)
                 )
+                // 줄 상자는 기준 크기로 잡혀 있으므로, 작은 글자는 그 안에서 중앙에 놓는다.
                 context.draw(resolved,
-                             at: CGPoint(x: sr.minX, y: sr.minY + CGFloat(i) * lineH),
+                             at: CGPoint(x: sr.minX,
+                                         y: sr.minY + CGFloat(i) * lineH + bodyFace.verticalOffset),
                              anchor: .topLeading)
             }
         }
@@ -952,17 +1010,25 @@ private struct DotsOverlayView: View {
         let rightCol = layout.findRightmostCol(in: a.row, from: a.col)
         let anchorRight = layout.center(row: a.row, col: rightCol).x + layout.half
 
-        let fontSize = sampler.subtitleFontSize
-        let lineH = fontSize * 1.08
-        let nsFont = NSFont(name: dotsFontName(forSize: fontSize), size: fontSize)
-            ?? NSFont.boldSystemFont(ofSize: fontSize)
+        // 본문 폰트는 내용에 따라 달라진다(한글이면 Interop 절반 크기).
+        // 여기서 정한 폰트로 폭을 재야 줄바꿈과 도트 숨김 영역이 렌더와 일치한다.
+        let face = subtitleTypeface(for: normalizedText, baseSize: sampler.subtitleFontSize)
+        let lineH = face.lineHeight
+        let nsFont = face.nsFont
         func measure(_ s: String) -> CGFloat {
             (s as NSString).size(withAttributes: [.font: nsFont]).width
         }
 
-        // 우측 블록(CANCEL / X GO)용 공간 예약. 사이 간격은 그리드 2칸.
+        // 우측 블록(CANCEL / X GO)은 항상 라틴이라 BPdots 를 유지한다.
+        let rightFontSize = sampler.subtitleFontSize
+        let rightFont = NSFont(name: dotsFontName(forSize: rightFontSize), size: rightFontSize)
+            ?? NSFont.boldSystemFont(ofSize: rightFontSize)
+        func measureRight(_ s: String) -> CGFloat {
+            (s as NSString).size(withAttributes: [.font: rightFont]).width
+        }
+
         let rawMaxWidth = max(1, anchorRight - anchorLeft)
-        let rightWidth: CGFloat = rightText.isEmpty ? 0 : measure(rightText)
+        let rightWidth: CGFloat = rightText.isEmpty ? 0 : measureRight(rightText)
         let rightGap:   CGFloat = rightText.isEmpty ? 0 : layout.grid * 2
         let maxWidth = rightText.isEmpty ? rawMaxWidth : max(1, rawMaxWidth - rightWidth - rightGap)
 
@@ -1033,8 +1099,8 @@ private struct DotsOverlayView: View {
 
         let rightBlockRect: CGRect? = rightText.isEmpty
             ? nil
-            : CGRect(x: anchorRight - rightWidth, y: anchorBottom - lineH,
-                     width: rightWidth, height: lineH)
+            : CGRect(x: anchorRight - rightWidth, y: anchorBottom - rightFontSize * 1.08,
+                     width: rightWidth, height: rightFontSize * 1.08)
 
         return (subtitleRect, wrapped, rightBlockRect)
     }
@@ -1769,11 +1835,10 @@ struct ContentView: View {
         interactiveCanvas
         .onAppear {
             applySubtitleSettings()
-            // 권한은 앱을 켤 때 미리 받는다. 재생 도중 첫 자막을 만들려는 순간에
-            // 물으면 흐름이 끊긴다. 자동 생성을 쓰지 않는 사용자에게는 묻지 않는다.
-            if autoGenerateSubtitles {
-                Task { await AppleSpeechTranscriber.requestAuthorizationIfNeeded() }
-            }
+            // 권한은 앱을 켤 때 한 번 받는다. 재생 도중 첫 자막을 만들려는 순간에
+            // 물으면 흐름이 끊긴다. 이미 허용/거부가 정해져 있으면 시스템이 다시 묻지 않으므로
+            // 매 실행 호출해도 실제 팝업은 최초 1회(그리고 앱이 새로 서명된 뒤)뿐이다.
+            Task { await AppleSpeechTranscriber.requestAuthorizationIfNeeded() }
             installKeyMonitor()
             Task { updateAvailableVersion = await UpdateChecker.availableUpdateVersion() }
             DispatchQueue.main.async {
