@@ -378,16 +378,18 @@ class VideoSampler: ObservableObject {
             }
         }
 
-        // legible(자막) 트랙 탐지 및 자동 선택
+        // legible(자막) 트랙 탐지 및 자동 선택.
+        // 트랙이 없어도(group == nil) 여기서 빠져나가면 안 된다 — 자동 생성 자막을 켤지
+        // 정하는 것도, hasSubtitles 를 갱신하는 것도 이 블록이라서, 예전처럼 guard 로
+        // 조기 반환하면 "내장 자막 없는 파일에서는 자동 생성이 아예 안 켜지는" 상태가 된다.
         Task { [weak self] in
             guard let self else { return }
             do {
-                let group = try await asset.loadMediaSelectionGroup(for: .legible)
+                let group = try? await asset.loadMediaSelectionGroup(for: .legible)
                 await MainActor.run {
-                    guard let group else { return }
-                    let options = group.options.filter {
+                    let options = group?.options.filter {
                         !$0.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
-                    }
+                    } ?? []
                     self.legibleGroup = group
                     self.firstLegibleOption = options.first
                     self.hasEmbeddedSubtitle = !options.isEmpty
@@ -595,7 +597,9 @@ class VideoSampler: ObservableObject {
         }
         let text = generator.cues.cue(at: seconds)?.text ?? ""
         if currentSubtitle != text {
-            DostLog.log(String(format: "cue @%.1fs -> %@", seconds, text.isEmpty ? "(empty)" : String(text.prefix(24))))
+            DostLog.log(String(format: "cue @%.1fs hasSub=%@ show=%@ -> %@", seconds,
+                               hasSubtitles ? "Y" : "N", showSubtitles ? "Y" : "N",
+                               text.isEmpty ? "(empty)" : String(text.prefix(20))))
             currentSubtitle = text
         }
     }
