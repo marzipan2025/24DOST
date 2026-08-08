@@ -303,9 +303,9 @@ struct SubtitleTypeface {
 /// 코레일 Light "한글자막" 87.4). 그런데 그 값은 눈으로 보면 한글이 작고 답답하다 —
 /// 한글은 획이 조밀해서 같은 높이라도 라틴 대문자보다 작게 읽히고, BPdots 쪽은
 /// 도트 매트릭스라 글자가 두툼해 더 커 보인다. 그래서 기하학적 일치보다 위로 올려 잡았다.
-/// 실제 값은 Interop 에서 눈으로 맞춘 비율(기하학적 일치의 1.335배)을 그대로 옮긴 것.
+/// 실제 값은 화면에서 보고 맞춘 것 — 기하학적 일치의 1.25배다.
 /// 재보고 싶으면 CTLineGetBoundsWithOptions(.useGlyphPathBounds).
-private let hangulSubtitleScale: CGFloat = 0.725
+private let hangulSubtitleScale: CGFloat = 0.68
 
 private func subtitleTypeface(for text: String, baseSize: CGFloat) -> SubtitleTypeface {
     let lineHeight = baseSize * 1.08

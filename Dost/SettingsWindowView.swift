@@ -27,15 +27,10 @@ private enum SettingsFont {
     }
 
     /// 타이틀(탭 제목·섹션 제목)을 뺀 나머지 본문. 코레일체 Light.
-    ///
-    /// BPdots 는 유니케이스라 같은 포인트에서 글자가 훨씬 작게 그려진다 — 100pt 에서
-    /// 잉크 높이가 BPdots 47.5, 코레일 87.4 로 1.8배 차이다. 그래서 호출부의 크기를
-    /// 그대로 쓰면 본문만 확 커져 레이아웃이 무너진다. 기하학적으로 맞추려면 0.54 인데
-    /// 그러면 한글이 읽기 힘들 만큼 작아져서, 자막에서 눈으로 맞췄던 비율에 가깝게 잡았다.
+    /// 크기는 보정 없이 호출부 값 그대로 쓴다.
     static func body(_ size: CGFloat) -> Font {
-        .custom("KorailL", size: size * bodyScale)
+        .custom("KorailL", size: size)
     }
-    private static let bodyScale: CGFloat = 0.8
 }
 
 private struct SettingsWindowConfigurator: NSViewRepresentable {
@@ -275,8 +270,10 @@ struct SettingsRow<Content: View>: View {
                         .font(SettingsFont.body(16))
                         .foregroundStyle(settingsRowText)
                     if let caption {
+                        // 항목명과 같은 크기. 색이 한 단계 어두워서 크기를 줄이지 않아도
+                        // 위계는 충분히 구분된다.
                         Text(caption)
-                            .font(SettingsFont.body(12))
+                            .font(SettingsFont.body(16))
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -503,9 +500,8 @@ private struct SettingsFooterButtonLabel: View {
         Text(title)
             .font(SettingsFont.body(14))
             .foregroundStyle(foregroundColor)
-            .offset(y: -2)
             .padding(.horizontal, 16)
-            .padding(.vertical, 6)
+            .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(backgroundColor)
@@ -985,32 +981,34 @@ struct SettingsMenuPicker: View {
                 Button(option.label) { selection = option.value }
             }
         } label: {
-            // Software Update 의 Check for Update 버튼과 같은 생김새.
-            HStack(spacing: 6) {
-                Text(currentLabel)
-                    .font(SettingsFont.body(14))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(settingsInactiveText)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color.white.opacity(0.08))
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(settingsPanelStroke, lineWidth: 0.5)
-            }
-            .contentShape(Rectangle())
+            Text(currentLabel)
+                .font(SettingsFont.body(14))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
         .focusable(false)
+        // 상자와 셰브론은 label 이 아니라 Menu 바깥에 그린다. borderlessButton 스타일이
+        // label 안의 배경·오버레이를 그대로 두지 않아서, 안에 넣으면 상자가 안 나온다.
+        .padding(.leading, 16)
+        .padding(.trailing, 32)     // 셰브론 자리
+        .padding(.vertical, 9)      // 높이 = 텍스트 + 18
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.white.opacity(0.08))
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(settingsPanelStroke, lineWidth: 0.5)
+        }
+        .overlay(alignment: .trailing) {
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(settingsInactiveText)
+                .padding(.trailing, 12)
+        }
     }
 }
 
@@ -1059,13 +1057,20 @@ struct SubtitleSettingsView: View {
                 SettingsRow("Look Ahead",
                             caption: "How far ahead of the playhead to keep subtitles ready.",
                             showDivider: false) {
-                    HStack(spacing: 10) {
-                        Text("\(Int(lookAhead))s")
-                            .font(SettingsFont.body(16))
-                            .foregroundStyle(accentColor)
-                            .monospacedDigit()
-                        Stepper("", value: $lookAhead, in: 5...90, step: 5).labelsHidden()
-                    }
+                    SettingsMenuPicker(
+                        options: Self.lookAheadChoices,
+                        // 예전 스테퍼(5단위)로 저장된 값은 목록에 없을 수 있다.
+                        // 가장 가까운 항목으로 스냅해서 빈 라벨이 뜨지 않게 한다.
+                        selection: Binding(
+                            get: {
+                                let stored = Int(lookAhead)
+                                let choices = Self.lookAheadChoices.compactMap { Int($0.value) }
+                                let nearest = choices.min { abs($0 - stored) < abs($1 - stored) }
+                                return String(nearest ?? Int(SubtitleDefaults.defaultLookAhead))
+                            },
+                            set: { lookAhead = Double($0) ?? SubtitleDefaults.defaultLookAhead }
+                        )
+                    )
                 }
             }
 
@@ -1146,6 +1151,10 @@ struct SubtitleSettingsView: View {
         ("es", "Spanish"), ("fr", "French"), ("de", "German"),
         ("it", "Italian"), ("pt", "Portuguese"), ("ru", "Russian"),
         ("ar", "Arabic"), ("hi", "Hindi"), ("th", "Thai"), ("vi", "Vietnamese")
+    ]
+
+    private static let lookAheadChoices: [(value: String, label: String)] = [
+        ("5", "5s"), ("10", "10s"), ("20", "20s"), ("40", "40s"), ("80", "80s")
     ]
 
     private static let claudeModels: [(value: String, label: String)] = [
