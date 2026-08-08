@@ -22,7 +22,7 @@ enum TranscriberError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notAuthorized:
-            return "음성 인식 권한이 없습니다. 시스템 설정 → 개인정보 보호 및 보안 → 음성 인식에서 24dost를 허용하세요."
+            return "음성 인식 권한이 없습니다. 시스템 설정 → 개인정보 보호 및 보안 → 음성 인식에서 24DOST를 허용하세요."
         case .localeUnsupported(let id):
             return "이 시스템의 음성 인식이 \(id) 언어를 지원하지 않습니다."
         case .modelUnavailable(let id):

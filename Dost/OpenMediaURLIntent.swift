@@ -3,7 +3,7 @@ import Foundation
 
 struct OpenMediaURLIntent: AppIntent {
     static var title: LocalizedStringResource = "Open Media URL"
-    static var description = IntentDescription("Opens a directly playable media URL in 24dost.")
+    static var description = IntentDescription("Opens a directly playable media URL in 24DOST.")
     static var openAppWhenRun: Bool = true
 
     @Parameter(title: "URL")

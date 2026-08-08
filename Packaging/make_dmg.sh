@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────
-# make_dmg.sh  —  24dost 1.1.5 DMG 패키져 (ffmpeg 임베드 포함)
+# make_dmg.sh  —  24DOST 0.0.2 DMG 패키져 (ffmpeg 임베드 포함)
 # ─────────────────────────────────────────────────────────
 set -e
 
-APP_NAME="24dost"
-VOL_NAME="24dost 0.0.1"
-VERSION="0.0.1"
+APP_NAME="24DOST"
+VOL_NAME="24DOST 0.0.2"
+VERSION="0.0.2"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -14,7 +14,7 @@ cd "$PROJECT_DIR"   # xcodebuild은 프로젝트 디렉터리에서 실행해야
 OUTPUT_BASENAME="${1:-${APP_NAME}-${VERSION}}"
 OUTPUT_BASENAME="${OUTPUT_BASENAME%.dmg}"
 OUTPUT="${SCRIPT_DIR}/../Releases/${VERSION}/${OUTPUT_BASENAME}.dmg"
-BG_IMG="${SCRIPT_DIR}/24dost_wallpaper.png"
+BG_IMG="${SCRIPT_DIR}/24DOST_wallpaper.png"
 
 # dylib 소스 경로 목록 (cp가 심링크를 자동으로 역참조함)
 DYLIB_SOURCES=(

@@ -97,9 +97,20 @@ final class SubtitleGenerator: ObservableObject {
     /// 직전 tick 의 재생 시각. 시각이 불연속으로 뛰면 탐색으로 본다.
     private var lastTickTime: TimeInterval?
 
-    /// 창 하나의 길이와 겹침. 겹침은 창 경계에서 말이 잘리는 걸 줄인다.
-    private let windowLength: TimeInterval = 30
-    private let windowOverlap: TimeInterval = 1.0
+    /// 창 하나의 길이.
+    ///
+    /// 창마다 SpeechAnalyzer 를 새로 만들기 때문에 창 경계는 전부 콜드 스타트다 —
+    /// 앞 문맥이 없는 상태에서 다시 시작하니 경계 근처 인식이 가장 나쁘고, 경계에
+    /// 걸친 세그먼트는 잘렸을 가능성 때문에 버려진다. 창을 길게 잡으면 경계 수가
+    /// 그만큼 줄어 인식 품질과 자막 수가 함께 올라간다.
+    ///
+    /// 대신 첫 자막이 늦어지는데, Apple Silicon 에서 창 하나 인식이 1~4초라
+    /// look-ahead(기본 20초) 안에서 충분히 흡수된다.
+    private let windowLength: TimeInterval = 60
+    /// 창 앞에 덧대는 오디오. 분석기가 달리기 시작할 구간을 줘서 경계 첫 마디가
+    /// 잘리는 걸 막는다. 이 구간에서 나온 세그먼트는 경계 필터가 걷어내므로
+    /// 자막이 겹치지는 않는다.
+    private let windowOverlap: TimeInterval = 2.5
 
     // MARK: - 미디어 연결
 
@@ -240,15 +251,24 @@ final class SubtitleGenerator: ObservableObject {
     }
 
     /// 필요하면 다음 창 작업을 시작한다.
-    /// 항상 **재생 헤드 이후의 첫 빈 구간**을 채운다. 그래서 뒤로 되감아도, 앞으로 건너뛰어도
-    /// 지금 보고 있는 자리부터 다시 만들어진다.
+    ///
+    /// 채울 자리는 두 단계로 고른다.
+    ///  1. **재생 헤드 이후의 첫 빈 구간.** 지금 보고 있는 자리가 언제나 먼저다. 그래서
+    ///     뒤로 되감아도, 앞으로 건너뛰어도 그 자리부터 다시 만들어진다.
+    ///  2. 재생 헤드부터 끝까지 다 찼으면 **앞쪽으로 돌아가 건너뛴 구간**을 메운다.
+    ///
+    /// look-ahead 만큼 앞서면 멈추는 게 아니라 파일 끝까지 계속 만든다. 재생 몇 분이면
+    /// 전체가 캐시에 차서, 그 뒤로는 타임라인을 어디로 옮겨도 자막이 즉시 뜬다.
+    /// (look-ahead 는 "이만큼은 확보돼야 한다"는 하한선으로 남아, leadSeconds 표시와
+    /// 탐색 직후 우선순위 판단에 쓰인다.)
     private func pump(now: TimeInterval? = nil) {
         guard isRunning, currentJob == nil, let asset else { return }
         let playhead = now ?? lastTickTime ?? 0
 
-        guard let frontier = firstUncovered(from: playhead), frontier < playhead + lookAhead else {
+        // 재생 헤드 뒤가 다 찼으면 처음부터 다시 훑어 건너뛴 구간을 찾는다.
+        guard let frontier = firstUncovered(from: playhead) ?? firstUncovered(from: 0) else {
             status = .caughtUp
-            persistCacheIfNeeded(force: false)
+            persistCacheIfNeeded(force: true)
             return
         }
         if mediaDuration > 0 && frontier >= mediaDuration - 0.5 {
@@ -373,14 +393,24 @@ final class SubtitleGenerator: ObservableObject {
     /// 분석기가 같은 구간을 다듬어 다시 내보내거나 창이 겹칠 때 생기는데, 상류에서
     /// 완벽히 막기 어려우니 큐 단위에서 한 번 더 거른다. 한쪽이 다른 쪽을 포함하는
     /// 경우("これがこれが最後か" vs "これが最後か")도 같은 대사로 본다.
+    /// 분석기가 같은 구간을 다듬어 두 번 내보낸 큐를 걸러낸다.
+    ///
+    /// 포함 관계(`contains`)까지 보는 이유는 다듬어진 결과가 앞선 결과보다 길어지는
+    /// 경우가 있어서인데, 짧은 문자열에 그대로 적용하면 안 된다 — "네." "응." "Yes."
+    /// 같은 맞장구는 2초 안의 아무 긴 대사에나 포함돼 버려서, 대사가 촘촘한 구간일수록
+    /// 멀쩡한 자막이 통째로 사라진다. 그래서 포함 판정은 짧은 쪽이 충분히 길 때만 쓴다.
     private func isDuplicate(_ cue: SubtitleCue) -> Bool {
         let window: TimeInterval = 2.0
+        /// 이보다 짧은 문자열은 포함 관계를 중복의 근거로 삼지 않는다.
+        let minLengthForContainment = 10
         let candidate = cue.sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !candidate.isEmpty else { return true }
         return cues.contains { existing in
             guard abs(existing.start - cue.start) < window else { return false }
             let other = existing.sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
-            return other == candidate || other.contains(candidate) || candidate.contains(other)
+            if other == candidate { return true }
+            guard min(other.count, candidate.count) >= minLengthForContainment else { return false }
+            return other.contains(candidate) || candidate.contains(other)
         }
     }
 
@@ -416,7 +446,10 @@ final class SubtitleGenerator: ObservableObject {
         var covered: [[TimeInterval]]
         var cues: [SubtitleCue]
     }
-    private static let cacheFormatVersion = 1
+    /// 2: 창 길이 60초 + 중복 판정 완화. 형식은 그대로지만 1로 만든 캐시는 품질이
+    ///    떨어져서, 그대로 두면 이미 본 파일에서는 개선이 보이지 않는다. 버전을 올려
+    ///    다시 재생할 때 재생성되게 한다 (재생 위치 앞쪽부터 필요한 만큼만).
+    private static let cacheFormatVersion = 2
 
     /// 캐시 위치: ~/Library/Application Support/24dost/subtitles/<hash>.<lang>.<engine>.json
     /// 원본 폴더를 건드리지 않으려고 앱 지원 폴더에 둔다.

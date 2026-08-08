@@ -198,7 +198,7 @@ private extension SettingsWindowView.SettingsTab {
     var subtitle: String {
         switch self {
         case .subtitles:
-            return "Automatic transcription and translation"
+            return "Subtitle display, transcription and translation"
         case .general:
             return "Core app behavior and launch defaults"
         case .shortcuts:
@@ -314,8 +314,6 @@ struct OnOffToggle: View {
 struct GeneralSettingsView: View {
     @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = false
     @AppStorage("autoResizeWindowToVideo") private var autoResizeWindowToVideo = true
-    @AppStorage("adaptiveSubtitleColor") private var adaptiveSubtitleColor = true
-    @AppStorage("subtitleBackdropWhilePeeking") private var subtitleBackdropWhilePeeking = false
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     @AppStorage("tapToPeek") private var tapToPeek = false
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
@@ -346,7 +344,7 @@ struct GeneralSettingsView: View {
             }
 
             SettingsSection("Appearance") {
-                SettingsRow("Accent Color", extraVerticalPadding: 4) {
+                SettingsRow("Accent Color", showDivider: false) {
                     HStack(spacing: 10) {
                         ForEach(AppAccentColor.allCases) { choice in
                             AccentColorSwatch(
@@ -357,12 +355,6 @@ struct GeneralSettingsView: View {
                             }
                         }
                     }
-                }
-                SettingsRow("Adaptive Subtitle Color") {
-                    OnOffToggle(isOn: $adaptiveSubtitleColor)
-                }
-                SettingsRow("Subtitle Backdrop While Peeking", showDivider: false) {
-                    OnOffToggle(isOn: $subtitleBackdropWhilePeeking)
                 }
             }
 
@@ -449,7 +441,7 @@ struct GeneralSettingsView: View {
         case .upToDate:                        return "You're up to date (v \(updater.currentVersion))."
         case .available(let v, _):             return "Version \(v) is available. You're on v \(updater.currentVersion)."
         case .downloading(let v):              return "Downloading v \(v)…"
-        case .readyToInstall(let v, _, _, _):  return "Version \(v) is ready. 24dost will quit and reopen to finish."
+        case .readyToInstall(let v, _, _, _):  return "Version \(v) is ready. 24DOST will quit and reopen to finish."
         case .failed(let message):             return message
         }
     }
@@ -679,7 +671,7 @@ struct LicencesSettingsView: View {
     private static let repositoryURL = URL(string: "https://github.com/marzipan2025/24DOST")!
 
     private static let licenseText = """
-    24dost third-party notices
+    24DOST third-party notices
 
     FFmpeg
     License: GPL-3.0-or-later
@@ -758,7 +750,7 @@ final class UpdateChecker: ObservableObject {
     let currentVersion: String =
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0"
 
-    private static let appBundleName = "24dost.app"
+    private static let appBundleName = "24DOST.app"
     static let releasesPageURL = URL(string: "https://github.com/marzipan2025/24DOST/releases")!
     private static let latestAPIURL =
         URL(string: "https://api.github.com/repos/marzipan2025/24DOST/releases/latest")!
@@ -1008,6 +1000,8 @@ struct SubtitleSettingsView: View {
     @AppStorage(SubtitleDefaults.claudeModel)      private var claudeModel = SubtitleDefaults.defaultClaudeModel
     @AppStorage(SubtitleDefaults.lookAheadSeconds) private var lookAhead = SubtitleDefaults.defaultLookAhead
     @AppStorage(AppAccentColor.storageKey)         private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
+    @AppStorage("adaptiveSubtitleColor")           private var adaptiveSubtitleColor = true
+    @AppStorage("subtitleBackdropWhilePeeking")    private var subtitleBackdropWhilePeeking = false
 
     @State private var apiKeyDraft = ""
     @State private var apiKeySaved = ClaudeAPIKeyStore.hasKey
@@ -1018,6 +1012,17 @@ struct SubtitleSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
+            // 파일 자막이든 생성 자막이든 똑같이 걸리는 설정이라 생성 항목보다 위에 둔다.
+            SettingsSection("Display") {
+                SettingsRow("Adaptive Subtitle Color",
+                            caption: "Picks the subtitle colour from the frame behind it so text stays readable.") {
+                    OnOffToggle(isOn: $adaptiveSubtitleColor)
+                }
+                SettingsRow("Subtitle Backdrop While Peeking", showDivider: false) {
+                    OnOffToggle(isOn: $subtitleBackdropWhilePeeking)
+                }
+            }
+
             SettingsSection("Automatic Subtitles") {
                 SettingsRow("Generate When No Subtitles Exist",
                             caption: "Transcribes the audio on this Mac and translates it, running ahead of the playhead so subtitles appear on time.") {

@@ -83,7 +83,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
+	<string>24DOST</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -108,6 +108,6 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>24dost transcribes the audio of the video you are watching, on your Mac, to generate translated subtitles. Audio is not sent anywhere.</string>
+	<string>24DOST transcribes the audio of the video you are watching, on your Mac, to generate translated subtitles. Audio is not sent anywhere.</string>
 </dict>
 </plist>

@@ -7,9 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		D100001 /* Interop-Light.otf in Resources */ = {isa = PBXBuildFile; fileRef = D100011 /* Interop-Light.otf */; };
-		D100002 /* Interop-Regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = D100012 /* Interop-Regular.otf */; };
-		D100003 /* Interop-SemiBold.otf in Resources */ = {isa = PBXBuildFile; fileRef = D100013 /* Interop-SemiBold.otf */; };
+		D100001 /* Korail-Light.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D100011 /* Korail-Light.ttf */; };
+		D100002 /* Korail-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D100012 /* Korail-Medium.ttf */; };
+		D100003 /* Korail-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D100013 /* Korail-Bold.ttf */; };
 		C100001 /* SubtitleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100011 /* SubtitleModels.swift */; };
 		C100002 /* SubtitleGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100012 /* SubtitleGenerator.swift */; };
 		C100003 /* Transcriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100013 /* Transcriber.swift */; };
@@ -27,9 +27,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		D100011 /* Interop-Light.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Interop-Light.otf"; sourceTree = "<group>"; };
-		D100012 /* Interop-Regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Interop-Regular.otf"; sourceTree = "<group>"; };
-		D100013 /* Interop-SemiBold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Interop-SemiBold.otf"; sourceTree = "<group>"; };
+		D100011 /* Korail-Light.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Korail-Light.ttf"; sourceTree = "<group>"; };
+		D100012 /* Korail-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Korail-Medium.ttf"; sourceTree = "<group>"; };
+		D100013 /* Korail-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Korail-Bold.ttf"; sourceTree = "<group>"; };
 		C100011 /* SubtitleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleModels.swift; sourceTree = "<group>"; };
 		C100012 /* SubtitleGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleGenerator.swift; sourceTree = "<group>"; };
 		C100013 /* Transcriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcriber.swift; sourceTree = "<group>"; };
@@ -95,9 +95,9 @@
 				A100017 /* bpdots.unicase-bold.otf */,
 				A10001A /* bpdots.unicase-regular.otf */,
 				A100018 /* bpdots.unicase-light.otf */,
-				D100011 /* Interop-Light.otf */,
-				D100012 /* Interop-Regular.otf */,
-				D100013 /* Interop-SemiBold.otf */,
+				D100011 /* Korail-Light.ttf */,
+				D100012 /* Korail-Medium.ttf */,
+				D100013 /* Korail-Bold.ttf */,
 			);
 			path = Fonts;
 			sourceTree = "<group>";
@@ -172,9 +172,9 @@
 				A100005 /* bpdots.unicase-bold.otf in Resources */,
 				A100008 /* bpdots.unicase-regular.otf in Resources */,
 				A100006 /* bpdots.unicase-light.otf in Resources */,
-				D100001 /* Interop-Light.otf in Resources */,
-				D100002 /* Interop-Regular.otf in Resources */,
-				D100003 /* Interop-SemiBold.otf in Resources */,
+				D100001 /* Korail-Light.ttf in Resources */,
+				D100002 /* Korail-Medium.ttf in Resources */,
+				D100003 /* Korail-Bold.ttf in Resources */,
 				A100007 /* Credits.html in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -279,10 +279,10 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.0.1;
+				MARKETING_VERSION = 0.0.2;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dost.app;
-				PRODUCT_NAME = "24dost";
+				PRODUCT_NAME = "24DOST";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};
@@ -302,10 +302,10 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.0.1;
+				MARKETING_VERSION = 0.0.2;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dost.app;
-				PRODUCT_NAME = "24dost";
+				PRODUCT_NAME = "24DOST";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 			};

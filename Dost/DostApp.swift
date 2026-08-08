@@ -307,6 +307,16 @@ struct DostApp: App {
                         Button("Clear History") { recents.clear() }
                     }
                 }
+
+                Divider()
+
+                // 재생 창은 타이틀바를 숨겨 쓰기 때문에 SwiftUI 가 File > Close 를 붙여주지
+                // 않는다. 창을 여러 개 띄웠을 때 하나만 닫을 방법이 없어서 직접 넣는다.
+                // keyWindow 우선 — 설정 창이 앞이면 설정 창이 닫힌다.
+                Button("Close Window") {
+                    (NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)
+                }
+                .keyboardShortcut("w", modifiers: .command)
             }
 
             // macOS 표준 설정 메뉴 위치 (App Menu)에 배치
