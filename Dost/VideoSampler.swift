@@ -130,6 +130,10 @@ class VideoSampler: ObservableObject {
     private var hasEmbeddedSubtitle: Bool = false
     // 외부 자막(.srt, .smi). 로드 시 embedded 보다 우선.
     private var externalCues: [SubtitleCue] = []
+    /// 같은 폴더에서 찾아 미리 읽어만 뒀고, 아직 사용자가 쓰겠다고 하지 않은 상태.
+    /// 미리 읽어두는 이유는 프롬프트를 닫아도 p 순환에 남겨두기 위해서다.
+    /// 이 값이 true 인 동안에는 자동으로 활성화하지 않는다.
+    private var externalIsPending = false
     /// 외부/생성 자막을 재생 시각에 맞춰 갱신하는 관찰자. 내장 자막은 플레이어가 밀어준다.
     private var subtitleTimeObserver: Any?
 
@@ -394,7 +398,7 @@ class VideoSampler: ObservableObject {
                     self.firstLegibleOption = options.first
                     self.hasEmbeddedSubtitle = !options.isEmpty
                     self.updateHasSubtitlesFlag()
-                    if self.hasExternalSubtitle {
+                    if self.hasExternalSubtitle && !self.externalIsPending {
                         self.subtitleMode = .external
                     } else if self.showSubtitles && !options.isEmpty {
                         self.subtitleMode = .embedded
@@ -443,6 +447,8 @@ class VideoSampler: ObservableObject {
         let current = effectiveSubtitleMode()
         let nextIndex = modes.firstIndex(of: current).map { ($0 + 1) % modes.count } ?? 0
         subtitleMode = modes[nextIndex]
+        // 순환으로 직접 골랐다면 더 이상 "물어보기 전" 상태가 아니다.
+        if subtitleMode == .external { externalIsPending = false }
         applySubtitleMode()
     }
 
@@ -450,11 +456,16 @@ class VideoSampler: ObservableObject {
 
     /// Shift+C 로 선택된 외부 자막 파일 로드. 성공 시 true, 실패 시 false.
     /// 이미 내장 자막이 선택되어 있더라도 외부 자막이 우선한다.
-    func loadExternalSubtitle(url: URL) -> Bool {
+    /// `activate: false` 로 부르면 순환 목록에만 올리고 지금 화면은 바꾸지 않는다.
+    func loadExternalSubtitle(url: URL, activate: Bool = true) -> Bool {
         guard let cues = SubtitleFile.parse(url: url) else { return false }
         externalCues = cues
         hasExternalSubtitle = true
+        externalIsPending = !activate
+        DostLog.log("loadExternalSubtitle activate=\(activate) file=\(url.lastPathComponent)")
         updateHasSubtitlesFlag()
+        // 미리 읽어만 두는 경우엔 여기서 끝 — 순환 목록에는 올라갔지만 화면은 그대로 둔다.
+        guard activate else { return true }
         subtitleMode = .external
         showSubtitles = true
         applySubtitleMode()
@@ -464,6 +475,7 @@ class VideoSampler: ObservableObject {
     private func clearExternalSubtitleState() {
         externalCues = []
         hasExternalSubtitle = false
+        externalIsPending = false
         updateHasSubtitlesFlag()
         if subtitleMode == .external {
             subtitleMode = hasEmbeddedSubtitle && showSubtitles ? .embedded : .off
@@ -1365,6 +1377,7 @@ class VideoSampler: ObservableObject {
         generator.detach()
         currentSourceURL = nil
         hasGeneratedSubtitle = false
+        externalIsPending = false
         seekTarget = nil
         externalCues = []
         hasExternalSubtitle = false

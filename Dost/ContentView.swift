@@ -1514,6 +1514,7 @@ struct ContentView: View {
             currentPlaybackPositionKey = key
             pendingAutoResize = true
             sampler.open(url: url)
+            preloadSiblingSubtitle()
             restorePlaybackPositionIfNeeded(for: key)
             return true
         case "fileGroup":
@@ -1768,6 +1769,11 @@ struct ContentView: View {
         interactiveCanvas
         .onAppear {
             applySubtitleSettings()
+            // 권한은 앱을 켤 때 미리 받는다. 재생 도중 첫 자막을 만들려는 순간에
+            // 물으면 흐름이 끊긴다. 자동 생성을 쓰지 않는 사용자에게는 묻지 않는다.
+            if autoGenerateSubtitles {
+                Task { await AppleSpeechTranscriber.requestAuthorizationIfNeeded() }
+            }
             installKeyMonitor()
             Task { updateAvailableVersion = await UpdateChecker.availableUpdateVersion() }
             DispatchQueue.main.async {
@@ -2028,6 +2034,14 @@ struct ContentView: View {
     }
 
     /// 사용자가 USE 수락 → 자막 로드. 실패 시 기존 악센트 레이블로 알림.
+    /// 같은 폴더에서 찾은 자막을 화면은 바꾸지 않고 미리 읽어 둔다.
+    /// 프롬프트에서 X 를 눌러도 p 순환에 남아 있어야 하기 때문이다 —
+    /// 안 그러면 "파일 자막 / 생성 자막 / 끄기" 세 단계가 두 단계로 줄어든다.
+    private func preloadSiblingSubtitle() {
+        guard let url = subtitlePromptURL else { return }
+        _ = sampler.loadExternalSubtitle(url: url, activate: false)
+    }
+
     private func acceptSubtitlePrompt() {
         guard let url = subtitlePromptURL else { return }
         subtitlePromptURL = nil
@@ -2138,6 +2152,7 @@ struct ContentView: View {
                 currentPlaybackPositionKey = key
                 pendingAutoResize = true
                 sampler.open(url: url)
+                preloadSiblingSubtitle()
                 sampler.isPlaying = true
                 restorePlaybackPositionIfNeeded(for: key)
                 return

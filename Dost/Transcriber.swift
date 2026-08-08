@@ -99,6 +99,12 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
         }
     }
 
+    /// 앱 시작 시 미리 받아두기 위한 진입점. 재생 도중 팝업이 뜨는 걸 피한다.
+    /// 이미 허용/거부가 정해져 있으면 시스템이 팝업을 띄우지 않는다.
+    static func requestAuthorizationIfNeeded() async {
+        try? await requestAuthorization()
+    }
+
     private static func requestAuthorization() async throws {
         switch SFSpeechRecognizer.authorizationStatus() {
         case .authorized:
