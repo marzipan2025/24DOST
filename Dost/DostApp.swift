@@ -23,6 +23,7 @@ extension Notification.Name {
     static let regenerateSubtitleRequested = Notification.Name("regenerateSubtitleRequested")
     /// 대기 화면 "Update →" 클릭 → 설정 창 Software Update 섹션 노출.
     static let revealSoftwareUpdate  = Notification.Name("revealSoftwareUpdate")
+    static let clearSubtitleCacheRequested = Notification.Name("clearSubtitleCacheRequested")
     /// 설정 창이 스크롤을 마친 뒤 업데이트 확인(check)을 트리거.
     static let performSoftwareUpdateCheck = Notification.Name("performSoftwareUpdateCheck")
 }

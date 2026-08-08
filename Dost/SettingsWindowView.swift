@@ -327,6 +327,7 @@ struct GeneralSettingsView: View {
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @State private var isResetConfirmationVisible = false
+    @State private var isCacheClearConfirmationVisible = false
     @StateObject private var updater = UpdateChecker()
 
     private var accentColor: Color { AppAccentColor.choice(for: accentColorRaw).color }
@@ -368,6 +369,43 @@ struct GeneralSettingsView: View {
 
             softwareUpdateSection
                 .id(softwareUpdateScrollID)
+
+            // 생성 자막만 따로 버리는 길. Reset Everything 은 설정까지 날리므로
+            // "자막이 이상하게 굳었다" 정도를 풀자고 쓰기엔 과하다.
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Deletes every generated subtitle stored on this Mac. They will be created again as you watch. Your settings are not affected.")
+                    .font(SettingsFont.body(14))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Button {
+                        isCacheClearConfirmationVisible.toggle()
+                    } label: {
+                        SettingsFooterButtonLabel(
+                            title: isCacheClearConfirmationVisible ? "Cancel" : "Clear Subtitle Cache",
+                            foregroundColor: .primary,
+                            backgroundColor: Color.white.opacity(0.08),
+                            strokeColor: settingsPanelStroke
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    if isCacheClearConfirmationVisible {
+                        Button {
+                            NotificationCenter.default.post(name: .clearSubtitleCacheRequested, object: nil)
+                            isCacheClearConfirmationVisible = false
+                        } label: {
+                            SettingsFooterButtonLabel(
+                                title: "Are you sure?",
+                                foregroundColor: .white,
+                                backgroundColor: AppAccentColor.choice(for: accentColorRaw).color
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
 
             VStack(alignment: .leading, spacing: 18) {
                 Text("This will permanently clear preferences, history, cache, and remembered app state. It cannot be undone.")
@@ -1092,7 +1130,9 @@ struct SubtitleSettingsView: View {
                     SettingsRow("API Key",
                                 caption: "Stored in your Keychain, never in preferences.",
                                 showDivider: false) {
-                        HStack(spacing: 8) {
+                        // 가로로 붙이면 좁은 창에서 버튼 글자가 세로로 쪼개진다("S a v e").
+                        // 입력칸 아래로 내려서 폭 경쟁을 없앤다.
+                        VStack(alignment: .trailing, spacing: 8) {
                             SecureField(apiKeySaved ? "••••••••••••" : "sk-ant-…", text: $apiKeyDraft)
                                 .textFieldStyle(.plain)
                                 .font(SettingsFont.body(13))
@@ -1114,6 +1154,7 @@ struct SubtitleSettingsView: View {
                             .font(SettingsFont.body(15))
                             .foregroundStyle(accentColor)
                             .buttonStyle(.plain)
+                            .fixedSize()
                         }
                     }
                 } else {

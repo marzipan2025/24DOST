@@ -1461,6 +1461,21 @@ struct ContentView: View {
          subtitleBackendRaw, claudeModel, String(lookAheadSeconds)].joined(separator: "|")
     }
 
+    /// 자막 설정이 바뀌었을 때. 결과물에 영향을 주는 항목(엔진·언어·모델)이 바뀌었다면
+    /// 옛 설정으로 만든 큐를 버리고 새 조합의 캐시를 읽어야 한다. 안 그러면 커버리지가
+    /// "다 만듦"이라 재생성도 안 되고 옛 자막이 계속 보인다 — 엔진을 Claude 로 바꿨다가
+    /// 되돌렸을 때 번역 안 된 원문이 그대로 굳던 원인이다.
+    /// look-ahead 는 결과물과 무관하므로 서명의 마지막 칸으로 두고 비교에서 뺀다.
+    private func handleSubtitleSettingsChange(from oldValue: String, to newValue: String) {
+        applySubtitleSettings()
+        guard outputAffectingPart(of: oldValue) != outputAffectingPart(of: newValue) else { return }
+        sampler.reloadGeneratorForSettingsChange()
+    }
+
+    private func outputAffectingPart(of signature: String) -> String {
+        signature.split(separator: "|").dropLast().joined(separator: "|")
+    }
+
     private func applySubtitleSettings() {
         sampler.autoGenerateSubtitles = autoGenerateSubtitles
         let g = sampler.generator
@@ -1990,7 +2005,13 @@ struct ContentView: View {
             onPlaybackEnded:        advancePlaylist,
             onOpenRecent:           handleOpenRecentNotification
         ))
-        .onChange(of: subtitleSettingsSignature) { _, _ in applySubtitleSettings() }
+        .onChange(of: subtitleSettingsSignature) { oldValue, newValue in
+            handleSubtitleSettingsChange(from: oldValue, to: newValue)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .clearSubtitleCacheRequested)) { _ in
+            let n = sampler.clearAllSubtitleCaches()
+            showTransientAccentLabel(n > 0 ? "CACHE CLEARED" : "NO CACHE")
+        }
         .onReceive(NotificationCenter.default.publisher(for: .exportSubtitleRequested)) { _ in
             exportGeneratedSubtitles()
         }

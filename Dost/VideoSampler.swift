@@ -527,6 +527,25 @@ class VideoSampler: ObservableObject {
     /// 모드를 바꿔도 생성이 계속되도록 하는 판단에만 쓴다.
     private var hasUsedGeneratedSubtitles = false
 
+    /// 번역 엔진이나 언어가 바뀌면 이미 만든 큐는 옛 설정의 산물이라 버려야 한다.
+    /// 캐시는 엔진·언어별로 파일이 갈리므로, 새 조합의 캐시를 다시 읽어 들인다.
+    /// (엔진만 바꾸고 큐를 그대로 두면, 커버리지가 "다 만듦"이라 재생성도 안 되고
+    ///  옛 설정으로 만든 자막이 계속 보인다.)
+    func reloadGeneratorForSettingsChange() {
+        guard let asset = player?.currentItem?.asset, currentSourceURL != nil else { return }
+        generator.flushCache()   // 아직 안 쓴 큐를 옛 조합의 캐시에 남기고 넘어간다
+        generator.attach(sourceURL: currentSourceURL, asset: asset)
+        applySubtitleMode()
+    }
+
+    /// 생성 자막 캐시를 전부 지우고 현재 미디어의 것도 다시 만들게 한다.
+    @discardableResult
+    func clearAllSubtitleCaches() -> Int {
+        let removed = SubtitleGenerator.clearAllCaches()
+        generator.regenerate()
+        return removed
+    }
+
     private func applySubtitleMode() {
         let mode = effectiveSubtitleMode()
         DostLog.log("applySubtitleMode: requested=\(subtitleMode) effective=\(mode) canGen=\(generator.canGenerate) hasEmb=\(hasEmbeddedSubtitle) hasExt=\(hasExternalSubtitle)")

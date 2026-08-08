@@ -534,6 +534,19 @@ final class SubtitleGenerator: ObservableObject {
         return (decoded.cues, covered)
     }
 
+    /// 생성 자막 캐시 폴더를 통째로 비운다. 지운 파일 수를 돌려준다.
+    static func clearAllCaches() -> Int {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        guard let dir = base?.appendingPathComponent("24dost/subtitles", isDirectory: true),
+              let files = try? FileManager.default.contentsOfDirectory(at: dir,
+                                                                       includingPropertiesForKeys: nil) else { return 0 }
+        var removed = 0
+        for f in files where f.pathExtension == "json" {
+            if (try? FileManager.default.removeItem(at: f)) != nil { removed += 1 }
+        }
+        return removed
+    }
+
     /// 캐시에 남길 커버리지. 잠정 구간(인식 결과가 비었던 창)은 빼고 준다.
     /// 그래야 다음에 이 파일을 열 때 그 구간을 한 번 더 시도한다.
     private func persistableCoveredRanges() -> [(start: TimeInterval, end: TimeInterval)] {
