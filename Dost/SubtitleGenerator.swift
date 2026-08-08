@@ -92,7 +92,15 @@ final class SubtitleGenerator: ObservableObject {
     /// 조각나기 때문이다. "여기까지 만들었다"를 숫자 하나로 들고 있으면 뒤로 되감았을 때
     /// 그 값이 그대로 남아 "이미 다 만들었다"고 판단해 버린다.
     private var coveredRanges: [(start: TimeInterval, end: TimeInterval)] = []
+    /// 인식 결과가 비어 있어 "덮었다"고만 쳐 둔 구간. 이 세션 안에서는 다시 읽지 않지만
+    /// 캐시에는 쓰지 않아서, 파일을 다시 열면 한 번 더 시도한다.
+    private var provisionalRanges: [(start: TimeInterval, end: TimeInterval)] = []
     private var currentJob: Task<Void, Never>?
+    /// 작업 세대 번호. 취소는 협조적이라, 취소를 알아채지 못한 옛 작업이 완료 블록까지
+    /// 도달할 수 있다. 그때 currentJob 을 nil 로 덮으면 그 사이 시작된 새 작업의 핸들이
+    /// 사라져 추적이 끊기고, pump 가 또 불려 작업이 둘로 늘어난다. 완료 블록은 자기
+    /// 세대가 아직 현재인지 확인하고 나서만 상태를 건드린다.
+    private var jobGeneration = 0
     private var lastPersistedCount = 0
     /// 직전 tick 의 재생 시각. 시각이 불연속으로 뛰면 탐색으로 본다.
     private var lastTickTime: TimeInterval?
@@ -120,6 +128,7 @@ final class SubtitleGenerator: ObservableObject {
         currentJob = nil
         cues = []
         coveredRanges = []
+        provisionalRanges = []
         lastPersistedCount = 0
         leadSeconds = 0
         lastTickTime = nil
@@ -145,6 +154,7 @@ final class SubtitleGenerator: ObservableObject {
         currentJob = nil
         cues = []
         coveredRanges = []
+        provisionalRanges = []
         asset = nil
         sourceURL = nil
         mediaDuration = 0
@@ -175,6 +185,7 @@ final class SubtitleGenerator: ObservableObject {
         currentJob = nil
         cues = []
         coveredRanges = []
+        provisionalRanges = []
         lastPersistedCount = 0
         if let url = cacheURL() { try? FileManager.default.removeItem(at: url) }
         status = .idle
@@ -298,6 +309,8 @@ final class SubtitleGenerator: ObservableObject {
         let isLastWindow = mediaDuration > 0 && windowEnd >= mediaDuration - 0.01
 
         status = .working
+        jobGeneration &+= 1
+        let generation = jobGeneration
         currentJob = Task { [weak self] in
             guard let self else { return }
             do {
@@ -329,20 +342,39 @@ final class SubtitleGenerator: ObservableObject {
                 try Task.checkCancellation()
 
                 await MainActor.run {
+                    // 내 세대가 아니면 이미 밀려난 작업이다. 결과만 챙기고 흐름은 건드리지 않는다.
+                    guard generation == self.jobGeneration else {
+                        for cue in translated where !self.isDuplicate(cue) {
+                            self.cues.insertSorted(cue)
+                        }
+                        if !translated.isEmpty { self.markCovered(from: boundary, to: nextCovered) }
+                        DostLog.log("stale job gen=\(generation) 무시 (현재 \(self.jobGeneration))")
+                        return
+                    }
                     for cue in translated where !self.isDuplicate(cue) {
                         self.cues.insertSorted(cue)
                     }
                     DostLog.log("+\(translated.count) cues (first: \(translated.first?.text.prefix(24) ?? ""))")
                     self.markCovered(from: boundary, to: nextCovered)
+                    // 말이 하나도 안 나온 창은 "확인했고 자막 없음"으로 굳히지 않는다.
+                    // 진짜 무음일 수도 있지만 디코딩이 잠깐 어긋나 빈 결과가 나왔을 수도 있는데,
+                    // 둘을 구분할 방법이 없다. 이 세션에서는 덮인 것으로 쳐서 앞으로 나아가되
+                    // (안 그러면 같은 창을 무한히 다시 읽는다) 캐시에는 남기지 않아서,
+                    // 다음에 이 파일을 열면 한 번 더 시도한다.
+                    if translated.isEmpty { self.provisionalRanges.append((boundary, nextCovered)) }
                     self.currentJob = nil
                     self.persistCacheIfNeeded(force: false)
                     self.pump()
                 }
             } catch is CancellationError {
-                await MainActor.run { self.currentJob = nil }
+                await MainActor.run {
+                    guard generation == self.jobGeneration else { return }
+                    self.currentJob = nil
+                }
             } catch {
                 DostLog.log("window FAILED: \(error.localizedDescription)")
                 await MainActor.run {
+                    guard generation == self.jobGeneration else { return }
                     self.currentJob = nil
                     self.status = .failed(error.localizedDescription)
                 }
@@ -484,6 +516,31 @@ final class SubtitleGenerator: ObservableObject {
         return (decoded.cues, covered)
     }
 
+    /// 캐시에 남길 커버리지. 잠정 구간(인식 결과가 비었던 창)은 빼고 준다.
+    /// 그래야 다음에 이 파일을 열 때 그 구간을 한 번 더 시도한다.
+    private func persistableCoveredRanges() -> [(start: TimeInterval, end: TimeInterval)] {
+        guard !provisionalRanges.isEmpty else { return coveredRanges }
+        var result: [(start: TimeInterval, end: TimeInterval)] = []
+        for range in coveredRanges {
+            // 이 구간에서 잠정 부분을 잘라낸다.
+            var pieces = [range]
+            for hole in provisionalRanges {
+                var next: [(start: TimeInterval, end: TimeInterval)] = []
+                for piece in pieces {
+                    if hole.end <= piece.start || hole.start >= piece.end {
+                        next.append(piece)
+                        continue
+                    }
+                    if hole.start > piece.start { next.append((piece.start, hole.start)) }
+                    if hole.end < piece.end { next.append((hole.end, piece.end)) }
+                }
+                pieces = next
+            }
+            result += pieces.filter { $0.end - $0.start > 0.5 }
+        }
+        return result
+    }
+
     /// 일정 개수 이상 쌓였을 때만 디스크에 쓴다 (매 창마다 쓰면 I/O 낭비).
     /// 임계값이 높으면 대사가 드문 영상에서 앱을 닫을 때 만든 걸 통째로 날린다.
     private func persistCacheIfNeeded(force: Bool) {
@@ -491,7 +548,7 @@ final class SubtitleGenerator: ObservableObject {
         let grown = cues.count - lastPersistedCount
         guard force || grown >= 4 else { return }
         let payload = CachedSubtitles(version: Self.cacheFormatVersion,
-                                      covered: coveredRanges.map { [$0.start, $0.end] },
+                                      covered: persistableCoveredRanges().map { [$0.start, $0.end] },
                                       cues: cues)
         if let data = try? JSONEncoder().encode(payload) {
             try? data.write(to: url, options: .atomic)

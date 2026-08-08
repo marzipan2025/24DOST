@@ -332,6 +332,7 @@ class VideoSampler: ObservableObject {
 
         // 생성기에 새 미디어를 물린다. 캐시가 있으면 즉시 복원된다.
         // remux 된 파일이어도 오디오 타임라인은 원본과 같으므로 그대로 읽으면 된다.
+        hasUsedGeneratedSubtitles = false
         generator.attach(sourceURL: currentSourceURL ?? url, asset: asset)
         hasGeneratedSubtitle = generator.canGenerate
         installSubtitleTimeObserver()
@@ -522,6 +523,10 @@ class VideoSampler: ObservableObject {
         }
     }
 
+    /// 이 미디어에서 생성 자막을 한 번이라도 표시했는지. 새 미디어를 열 때 초기화된다.
+    /// 모드를 바꿔도 생성이 계속되도록 하는 판단에만 쓴다.
+    private var hasUsedGeneratedSubtitles = false
+
     private func applySubtitleMode() {
         let mode = effectiveSubtitleMode()
         DostLog.log("applySubtitleMode: requested=\(subtitleMode) effective=\(mode) canGen=\(generator.canGenerate) hasEmb=\(hasEmbeddedSubtitle) hasExt=\(hasExternalSubtitle)")
@@ -566,8 +571,13 @@ class VideoSampler: ObservableObject {
             currentSubtitle = ""
         }
 
-        // 생성기는 이 모드일 때만 돌린다 — 안 보는 자막을 만드느라 CPU 를 쓰지 않는다.
-        if mode == .generated { generator.start() } else { generator.stop() }
+        // 한 번이라도 생성 자막을 본 미디어라면, 다른 모드로 바꿔도 생성을 멈추지 않는다.
+        // 여유가 있을 때 파일 끝까지 미리 만들어 두는 게 이 파이프라인의 규칙이라,
+        // p 로 잠깐 파일 자막을 확인하고 돌아왔을 때 진행이 그대로 이어져야 한다.
+        // 생성 자막을 쓴 적 없는 미디어에서는 예전처럼 아무것도 만들지 않는다 —
+        // 안 볼 자막을 만드느라 CPU 를 쓸 이유가 없다.
+        if mode == .generated { hasUsedGeneratedSubtitles = true }
+        if hasUsedGeneratedSubtitles { generator.start() } else { generator.stop() }
     }
 
     private func removeSubtitleTimeObserver() {
