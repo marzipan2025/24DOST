@@ -105,16 +105,32 @@ final class SubtitleGenerator: ObservableObject {
     /// 직전 tick 의 재생 시각. 시각이 불연속으로 뛰면 탐색으로 본다.
     private var lastTickTime: TimeInterval?
 
-    /// 창 하나의 길이.
+    /// 창 하나의 길이. 급한 자리냐 아니냐에 따라 둘로 나뉜다.
     ///
     /// 창마다 SpeechAnalyzer 를 새로 만들기 때문에 창 경계는 전부 콜드 스타트다 —
     /// 앞 문맥이 없는 상태에서 다시 시작하니 경계 근처 인식이 가장 나쁘고, 경계에
-    /// 걸친 세그먼트는 잘렸을 가능성 때문에 버려진다. 창을 길게 잡으면 경계 수가
-    /// 그만큼 줄어 인식 품질과 자막 수가 함께 올라간다.
+    /// 걸친 세그먼트는 잘렸을 가능성 때문에 버려진다. 그래서 창은 길수록 좋다.
     ///
-    /// 대신 첫 자막이 늦어지는데, Apple Silicon 에서 창 하나 인식이 1~4초라
-    /// look-ahead(기본 20초) 안에서 충분히 흡수된다.
-    private let windowLength: TimeInterval = 60
+    /// 그런데 창이 길면 그 창이 끝나야 자막이 나오므로, **사용자가 기다리는 자리**
+    /// 에서는 손해다. 파일을 막 열었거나 안 만든 지점으로 점프했을 때가 그렇다.
+    /// 반대로 재생 위치보다 한참 앞을 채우는 중이라면 아무도 기다리지 않는다.
+    /// 그 둘을 나눠서, 급할 땐 짧게 응답하고 여유로울 땐 길게 잡아 품질을 올린다.
+    private let urgentWindowLength: TimeInterval = 60
+    private let relaxedWindowLength: TimeInterval = 180
+
+    /// 이 창을 사용자가 기다리고 있는지.
+    ///
+    /// "look-ahead 안쪽"만 보면 안 된다 — 백필(재생 위치보다 **뒤쪽** 빈 구간 메우기)은
+    /// frontier 가 playhead 보다 작아서 그 조건을 항상 통과해 버린다. 세상에서 제일
+    /// 안 급한 작업인데 전부 짧은 창으로 처리하게 된다. 재생 헤드 근처이면서 앞쪽일
+    /// 때만 급한 것으로 본다.
+    private func isUrgent(frontier: TimeInterval, playhead: TimeInterval) -> Bool {
+        frontier >= playhead - 5 && frontier <= playhead + lookAhead
+    }
+
+    private func windowLength(frontier: TimeInterval, playhead: TimeInterval) -> TimeInterval {
+        isUrgent(frontier: frontier, playhead: playhead) ? urgentWindowLength : relaxedWindowLength
+    }
     /// 창 앞에 덧대는 오디오. 분석기가 달리기 시작할 구간을 줘서 경계 첫 마디가
     /// 잘리는 걸 막는다. 이 구간에서 나온 세그먼트는 경계 필터가 걷어내므로
     /// 자막이 겹치지는 않는다.
@@ -289,7 +305,7 @@ final class SubtitleGenerator: ObservableObject {
         }
 
         let windowStart = max(0, frontier - windowOverlap)
-        var windowEnd = frontier + windowLength
+        var windowEnd = frontier + windowLength(frontier: frontier, playhead: playhead)
         if mediaDuration > 0 { windowEnd = min(windowEnd, mediaDuration) }
         // 이미 만들어 둔 다음 구간을 다시 읽지 않도록 창을 거기서 끊는다.
         if let nextCovered = nextCoveredStart(after: frontier) {
@@ -300,8 +316,10 @@ final class SubtitleGenerator: ObservableObject {
             return
         }
 
-        DostLog.log(String(format: "pump: window %.1f-%.1fs frontier=%.1f now=%.1f ranges=%d",
-                           windowStart, windowEnd, frontier, playhead, coveredRanges.count))
+        DostLog.log(String(format: "pump: window %.1f-%.1fs (%@) frontier=%.1f now=%.1f ranges=%d",
+                           windowStart, windowEnd,
+                           isUrgent(frontier: frontier, playhead: playhead) ? "urgent" : "relaxed",
+                           frontier, playhead, coveredRanges.count))
         let boundary = frontier
         let locale = resolvedSourceLocale()
         let target = targetLanguage
