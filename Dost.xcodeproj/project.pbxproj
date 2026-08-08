@@ -1,0 +1,327 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		C100001 /* SubtitleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100011 /* SubtitleModels.swift */; };
+		C100002 /* SubtitleGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100012 /* SubtitleGenerator.swift */; };
+		C100003 /* Transcriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100013 /* Transcriber.swift */; };
+		C100004 /* Translator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100014 /* Translator.swift */; };
+		A100001 /* DostApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100011 /* DostApp.swift */; };
+		A100002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100012 /* ContentView.swift */; };
+		A100003 /* VideoSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100013 /* VideoSampler.swift */; };
+		A10001D /* SettingsWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10001E /* SettingsWindowView.swift */; };
+		A100004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A100014 /* Assets.xcassets */; };
+		A100005 /* bpdots.unicase-bold.otf in Resources */ = {isa = PBXBuildFile; fileRef = A100017 /* bpdots.unicase-bold.otf */; };
+		A100006 /* bpdots.unicase-light.otf in Resources */ = {isa = PBXBuildFile; fileRef = A100018 /* bpdots.unicase-light.otf */; };
+		A100007 /* Credits.html in Resources */ = {isa = PBXBuildFile; fileRef = A100019 /* Credits.html */; };
+		A100008 /* bpdots.unicase-regular.otf in Resources */ = {isa = PBXBuildFile; fileRef = A10001A /* bpdots.unicase-regular.otf */; };
+		A100022 /* OpenMediaURLIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100023 /* OpenMediaURLIntent.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		C100011 /* SubtitleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleModels.swift; sourceTree = "<group>"; };
+		C100012 /* SubtitleGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleGenerator.swift; sourceTree = "<group>"; };
+		C100013 /* Transcriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcriber.swift; sourceTree = "<group>"; };
+		C100014 /* Translator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Translator.swift; sourceTree = "<group>"; };
+		A100010 /* Dost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A100011 /* DostApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DostApp.swift; sourceTree = "<group>"; };
+		A100012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A100013 /* VideoSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoSampler.swift; sourceTree = "<group>"; };
+		A10001E /* SettingsWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowView.swift; sourceTree = "<group>"; };
+		A100014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A100015 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A100016 /* Dost.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dost.entitlements; sourceTree = "<group>"; };
+		A100017 /* bpdots.unicase-bold.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "bpdots.unicase-bold.otf"; sourceTree = "<group>"; };
+		A100018 /* bpdots.unicase-light.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "bpdots.unicase-light.otf"; sourceTree = "<group>"; };
+		A100019 /* Credits.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = Credits.html; sourceTree = "<group>"; };
+		A10001A /* bpdots.unicase-regular.otf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "bpdots.unicase-regular.otf"; sourceTree = "<group>"; };
+		A100023 /* OpenMediaURLIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenMediaURLIntent.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A100020 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A100030 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A100010 /* Dost.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A100031 /* Dost */ = {
+			isa = PBXGroup;
+			children = (
+				A100011 /* DostApp.swift */,
+					A100012 /* ContentView.swift */,
+					A10001E /* SettingsWindowView.swift */,
+					A100013 /* VideoSampler.swift */,
+					C100011 /* SubtitleModels.swift */,
+					C100012 /* SubtitleGenerator.swift */,
+					C100013 /* Transcriber.swift */,
+					C100014 /* Translator.swift */,
+				A100023 /* OpenMediaURLIntent.swift */,
+				A100014 /* Assets.xcassets */,
+				A100033 /* Fonts */,
+				A100019 /* Credits.html */,
+				A100015 /* Info.plist */,
+				A100016 /* Dost.entitlements */,
+			);
+			path = Dost;
+			sourceTree = "<group>";
+		};
+		A100033 /* Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				A100017 /* bpdots.unicase-bold.otf */,
+				A10001A /* bpdots.unicase-regular.otf */,
+				A100018 /* bpdots.unicase-light.otf */,
+			);
+			path = Fonts;
+			sourceTree = "<group>";
+		};
+		A100032 = {
+			isa = PBXGroup;
+			children = (
+				A100031 /* Dost */,
+				A100030 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A100040 /* Dost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A100050 /* Build configuration list for PBXNativeTarget "Dost" */;
+			buildPhases = (
+				A100060 /* Sources */,
+				A100020 /* Frameworks */,
+				A100070 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Dost;
+			productName = Dost;
+			productReference = A100010 /* Dost.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A100080 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					A100040 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = A100051 /* Build configuration list for PBXProject "Dost" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A100032;
+			productRefGroup = A100030 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A100040 /* Dost */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A100070 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A100004 /* Assets.xcassets in Resources */,
+				A100005 /* bpdots.unicase-bold.otf in Resources */,
+				A100008 /* bpdots.unicase-regular.otf in Resources */,
+				A100006 /* bpdots.unicase-light.otf in Resources */,
+				A100007 /* Credits.html in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A100060 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+					A100001 /* DostApp.swift in Sources */,
+					A100002 /* ContentView.swift in Sources */,
+					A10001D /* SettingsWindowView.swift in Sources */,
+					A100003 /* VideoSampler.swift in Sources */,
+					C100001 /* SubtitleModels.swift in Sources */,
+					C100002 /* SubtitleGenerator.swift in Sources */,
+					C100003 /* Transcriber.swift in Sources */,
+					C100004 /* Translator.swift in Sources */,
+				A100022 /* OpenMediaURLIntent.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A100090 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A100091 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		A100092 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Dost/Dost.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Dost/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.0.1;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dost.app;
+				PRODUCT_NAME = "24dost";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A100093 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Dost/Dost.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Dost/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.0.1;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.dost.app;
+				PRODUCT_NAME = "24dost";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A100050 /* Build configuration list for PBXNativeTarget "Dost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A100092 /* Debug */,
+				A100093 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A100051 /* Build configuration list for PBXProject "Dost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A100090 /* Debug */,
+				A100091 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+	};
+	rootObject = A100080 /* Project object */;
+}

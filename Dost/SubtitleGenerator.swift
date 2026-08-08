@@ -1,0 +1,485 @@
+import AVFoundation
+import CryptoKit
+import Foundation
+
+/// 파이프라인 추적용 파일 로거.
+/// 통합 로그(os.Logger)는 info 레벨이 기본으로 안 남고 프로세스 이름 매칭도 까다로워서
+/// 개발 중 추적에는 파일이 훨씬 확실하다. DOST_DEBUG_LOG 환경변수로만 켜진다.
+enum DostLog {
+    private static let handle: FileHandle? = {
+        guard ProcessInfo.processInfo.environment["DOST_DEBUG_LOG"] != nil else { return nil }
+        let url = URL(fileURLWithPath: "/tmp/dost-debug.log")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+        }
+        let h = try? FileHandle(forWritingTo: url)
+        try? h?.seekToEnd()
+        return h
+    }()
+
+    static func log(_ message: String) {
+        guard let handle else { return }
+        let stamp = String(format: "%.1f", Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 10000))
+        handle.write(Data("[\(stamp)] \(message)\n".utf8))
+    }
+}
+
+// MARK: - Settings keys (SettingsWindowView 와 공유)
+
+enum SubtitleDefaults {
+    static let autoGenerate     = "24dost.subtitle.autoGenerate"
+    static let sourceLanguage   = "24dost.subtitle.sourceLanguage"   // "auto" 또는 BCP-47
+    static let targetLanguage   = "24dost.subtitle.targetLanguage"   // BCP-47
+    static let backend          = "24dost.subtitle.backend"          // TranslationBackend.rawValue
+    static let claudeModel      = "24dost.subtitle.claudeModel"
+    static let lookAheadSeconds = "24dost.subtitle.lookAhead"
+
+    static let defaultTarget = "ko"
+    static let defaultClaudeModel = "claude-haiku-4-5"
+    static let defaultLookAhead: Double = 20
+}
+
+// MARK: - Generator
+
+/// 영상의 음성을 인식하고 번역해 자막 큐를 만든다.
+///
+/// "실시간"이 아니라 **재생 헤드보다 앞서 달리는** 방식이다. 파일 재생에서는 이게
+/// 실시간보다 쉽고 결과도 낫다 — 자막이 타임스탬프에 맞춰 정확히 뜨므로 사용자
+/// 눈에는 지연이 0이다.
+///
+/// 화면에 무엇을 그릴지는 전혀 모른다. 자막 소스 선택과 표시는 VideoSampler 가
+/// 내장/외부 자막과 똑같은 방식으로 처리한다.
+@MainActor
+final class SubtitleGenerator: ObservableObject {
+
+    enum Status: Equatable {
+        case idle
+        case working                // 앞서 달리는 중
+        case caughtUp               // 필요한 만큼 다 만듦
+        case failed(String)
+    }
+
+    // MARK: 공개 상태
+
+    @Published private(set) var cues: [SubtitleCue] = []
+    @Published private(set) var status: Status = .idle
+    /// 생성된 자막이 재생 헤드보다 얼마나 앞서 있는지(초).
+    @Published private(set) var leadSeconds: TimeInterval = 0
+    /// 생성이 켜져 있는지. 끄면 진행 중 작업을 멈추지만 이미 만든 큐는 남는다.
+    private(set) var isRunning = false
+
+    /// 오디오를 읽을 대상이 준비돼 있는지.
+    var canGenerate: Bool { asset != nil && sourceURL != nil }
+
+    // MARK: 설정 (ContentView 가 UserDefaults 에서 읽어 넣어준다)
+
+    var sourceLocale: Locale? = nil          // nil = 자동(시스템 선호 언어)
+    var targetLanguage: Locale.Language = Locale.Language(identifier: SubtitleDefaults.defaultTarget)
+    var backend: TranslationBackend = .apple
+    var claudeModel: String = SubtitleDefaults.defaultClaudeModel
+    var lookAhead: TimeInterval = SubtitleDefaults.defaultLookAhead
+
+    // MARK: 내부 상태
+
+    private var asset: AVAsset?
+    private var sourceURL: URL?
+    private var mediaDuration: TimeInterval = 0
+
+    private let transcriber: any SpeechTranscribing = AppleSpeechTranscriber()
+
+    /// 이미 생성이 끝난 구간들 (시작 오름차순, 겹치지 않게 병합 유지).
+    /// 스칼라 하나로는 표현할 수 없다 — 사용자가 타임라인을 뛰어다니면 커버리지가
+    /// 조각나기 때문이다. "여기까지 만들었다"를 숫자 하나로 들고 있으면 뒤로 되감았을 때
+    /// 그 값이 그대로 남아 "이미 다 만들었다"고 판단해 버린다.
+    private var coveredRanges: [(start: TimeInterval, end: TimeInterval)] = []
+    private var currentJob: Task<Void, Never>?
+    private var lastPersistedCount = 0
+    /// 직전 tick 의 재생 시각. 시각이 불연속으로 뛰면 탐색으로 본다.
+    private var lastTickTime: TimeInterval?
+
+    /// 창 하나의 길이와 겹침. 겹침은 창 경계에서 말이 잘리는 걸 줄인다.
+    private let windowLength: TimeInterval = 30
+    private let windowOverlap: TimeInterval = 1.0
+
+    // MARK: - 미디어 연결
+
+    /// 새 미디어가 열릴 때 호출. 캐시가 있으면 통째로 복원한다.
+    func attach(sourceURL: URL?, asset: AVAsset?) {
+        currentJob?.cancel()
+        currentJob = nil
+        cues = []
+        coveredRanges = []
+        lastPersistedCount = 0
+        leadSeconds = 0
+        lastTickTime = nil
+        mediaDuration = 0
+        status = .idle
+        self.sourceURL = sourceURL
+        self.asset = asset
+
+        // 캐시된 자막이 있으면 복원 — 두 번째 재생은 즉시 뜬다.
+        // 어떤 구간을 만들었는지도 함께 복원한다. 큐의 시각에서 역산하면 말이 없어서
+        // 큐가 안 생긴 구간을 "아직 안 만든 곳"으로 오해한다.
+        if let cached = loadCache() {
+            cues = cached.cues
+            coveredRanges = cached.covered
+            lastPersistedCount = cached.cues.count
+        }
+        DostLog.log("attach url=\(sourceURL?.lastPathComponent ?? "nil") asset=\(asset != nil) cached=\(cues.count)")
+    }
+
+    func detach() {
+        flushCache()
+        currentJob?.cancel()
+        currentJob = nil
+        cues = []
+        coveredRanges = []
+        asset = nil
+        sourceURL = nil
+        mediaDuration = 0
+        isRunning = false
+        leadSeconds = 0
+        lastTickTime = nil
+        status = .idle
+    }
+
+    /// 생성 시작/재개.
+    func start() {
+        guard canGenerate else { return }
+        isRunning = true
+        pump()
+    }
+
+    /// 생성 중지. 이미 만든 큐는 그대로 남는다.
+    func stop() {
+        isRunning = false
+        currentJob?.cancel()
+        currentJob = nil
+        if case .working = status { status = .idle }
+    }
+
+    /// 만든 걸 버리고 처음부터 다시 만든다.
+    func regenerate() {
+        currentJob?.cancel()
+        currentJob = nil
+        cues = []
+        coveredRanges = []
+        lastPersistedCount = 0
+        if let url = cacheURL() { try? FileManager.default.removeItem(at: url) }
+        status = .idle
+        if isRunning { pump() }
+    }
+
+    // MARK: - 커버리지 구간 집합
+
+    /// 구간을 덮은 것으로 기록하고, 맞닿거나 겹치는 것들을 병합한다.
+    private func markCovered(from start: TimeInterval, to end: TimeInterval) {
+        guard end > start else { return }
+        var merged: [(start: TimeInterval, end: TimeInterval)] = []
+        var new = (start: start, end: end)
+        for range in coveredRanges {
+            // 0.5초 이내로 붙어 있으면 같은 구간으로 본다 (창 경계의 미세한 틈 흡수).
+            if range.end < new.start - 0.5 {
+                merged.append(range)
+            } else if range.start > new.end + 0.5 {
+                merged.append(new)
+                new = range
+            } else {
+                new = (start: Swift.min(range.start, new.start), end: Swift.max(range.end, new.end))
+            }
+        }
+        merged.append(new)
+        coveredRanges = merged.sorted { $0.start < $1.start }
+    }
+
+    /// `t` 이상에서 아직 안 덮인 첫 지점. 전부 덮여 있으면 nil.
+    /// 1초 미만의 틈은 덮인 것으로 친다 — 그걸 메우겠다고 1초짜리 창을 도는 건 낭비다.
+    private func firstUncovered(from t: TimeInterval) -> TimeInterval? {
+        var probe = t
+        for range in coveredRanges where range.end > probe {
+            if range.start > probe + 1.0 { return probe }
+            probe = Swift.max(probe, range.end)
+        }
+        if mediaDuration > 0 && probe >= mediaDuration - 0.5 { return nil }
+        return probe
+    }
+
+    /// `t` 뒤에 있는 다음 덮인 구간의 시작. 없으면 nil.
+    private func nextCoveredStart(after t: TimeInterval) -> TimeInterval? {
+        coveredRanges.first { $0.start > t }?.start
+    }
+
+    /// `t` 부터 이어지는 커버리지가 끝나는 지점. 안 덮여 있으면 t 자신.
+    private func coveredEnd(from t: TimeInterval) -> TimeInterval {
+        var probe = t
+        for range in coveredRanges where range.end > probe {
+            if range.start > probe + 1.0 { break }
+            probe = Swift.max(probe, range.end)
+        }
+        return probe
+    }
+
+    // MARK: - 시간 진행
+
+    /// 재생 시각이 바뀔 때마다 호출 (VideoSampler 의 time observer 에서).
+    func tick(currentTime: TimeInterval, duration: TimeInterval) {
+        if duration > 0 { mediaDuration = duration }
+        guard isRunning else { return }
+
+        let previous = lastTickTime
+        lastTickTime = currentTime
+        // 탐색(두 tick 사이 시각이 불연속으로 뜀)이면 진행 중이던 창은 엉뚱한 위치를 읽고
+        // 있으므로 버린다. 단순히 생성이 뒤처진 거라면 그대로 두고 끝까지 마치게 한다.
+        // 어디를 채울지는 pump 가 재생 헤드 기준으로 다시 고른다.
+        if let previous, abs(currentTime - previous) > 2.0 {
+            currentJob?.cancel()
+            currentJob = nil
+        }
+        leadSeconds = max(0, coveredEnd(from: currentTime) - currentTime)
+        pump(now: currentTime)
+    }
+
+    /// 필요하면 다음 창 작업을 시작한다.
+    /// 항상 **재생 헤드 이후의 첫 빈 구간**을 채운다. 그래서 뒤로 되감아도, 앞으로 건너뛰어도
+    /// 지금 보고 있는 자리부터 다시 만들어진다.
+    private func pump(now: TimeInterval? = nil) {
+        guard isRunning, currentJob == nil, let asset else { return }
+        let playhead = now ?? lastTickTime ?? 0
+
+        guard let frontier = firstUncovered(from: playhead), frontier < playhead + lookAhead else {
+            status = .caughtUp
+            persistCacheIfNeeded(force: false)
+            return
+        }
+        if mediaDuration > 0 && frontier >= mediaDuration - 0.5 {
+            status = .caughtUp
+            persistCacheIfNeeded(force: true)
+            return
+        }
+
+        let windowStart = max(0, frontier - windowOverlap)
+        var windowEnd = frontier + windowLength
+        if mediaDuration > 0 { windowEnd = min(windowEnd, mediaDuration) }
+        // 이미 만들어 둔 다음 구간을 다시 읽지 않도록 창을 거기서 끊는다.
+        if let nextCovered = nextCoveredStart(after: frontier) {
+            windowEnd = min(windowEnd, nextCovered)
+        }
+        guard windowEnd > windowStart + 0.5 else {
+            status = .caughtUp
+            return
+        }
+
+        DostLog.log(String(format: "pump: window %.1f-%.1fs frontier=%.1f now=%.1f ranges=%d",
+                           windowStart, windowEnd, frontier, playhead, coveredRanges.count))
+        let boundary = frontier
+        let locale = resolvedSourceLocale()
+        let target = targetLanguage
+        let translator = makeTranslator()
+        let isLastWindow = mediaDuration > 0 && windowEnd >= mediaDuration - 0.01
+
+        status = .working
+        currentJob = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let range = CMTimeRange(
+                    start: CMTime(seconds: windowStart, preferredTimescale: 600),
+                    duration: CMTime(seconds: windowEnd - windowStart, preferredTimescale: 600)
+                )
+                let raw = try await self.transcriber.transcribe(asset: asset,
+                                                                timeRange: range,
+                                                                locale: locale)
+                try Task.checkCancellation()
+                DostLog.log(String(format: "transcribed %d segments for %.1f-%.1fs", raw.count, windowStart, windowEnd))
+
+                // 겹침 구간에서 이미 만든 큐와 중복되는 세그먼트를 버린다.
+                var segments = raw.filter { $0.end > boundary + 0.05 }
+
+                // 창 끝에 딱 붙어 끝나는 세그먼트는 말이 잘렸을 가능성이 크다.
+                // 마지막 창이 아니면 버리고, 다음 창을 그 세그먼트 시작점부터 다시 읽는다.
+                var nextCovered = windowEnd
+                if !isLastWindow, let last = segments.last, last.end >= windowEnd - 0.35 {
+                    segments.removeLast()
+                    nextCovered = max(boundary + 1.0, last.start)
+                }
+
+                let translated = try await self.translateIfNeeded(segments,
+                                                                  translator: translator,
+                                                                  locale: locale,
+                                                                  target: target)
+                try Task.checkCancellation()
+
+                await MainActor.run {
+                    for cue in translated where !self.isDuplicate(cue) {
+                        self.cues.insertSorted(cue)
+                    }
+                    DostLog.log("+\(translated.count) cues (first: \(translated.first?.text.prefix(24) ?? ""))")
+                    self.markCovered(from: boundary, to: nextCovered)
+                    self.currentJob = nil
+                    self.persistCacheIfNeeded(force: false)
+                    self.pump()
+                }
+            } catch is CancellationError {
+                await MainActor.run { self.currentJob = nil }
+            } catch {
+                DostLog.log("window FAILED: \(error.localizedDescription)")
+                await MainActor.run {
+                    self.currentJob = nil
+                    self.status = .failed(error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    /// 번역이 필요하면 번역해서, 아니면 원문 그대로 큐로 만든다.
+    private nonisolated func translateIfNeeded(_ segments: [TranscriptSegment],
+                                               translator: (any SubtitleTranslating)?,
+                                               locale: Locale,
+                                               target: Locale.Language) async throws -> [SubtitleCue] {
+        guard !segments.isEmpty else { return [] }
+        let sourceLang = locale.language
+
+        // 같은 언어면 번역 생략 — 인식된 원문을 그대로 자막으로 쓴다.
+        let sameLanguage = sourceLang.languageCode?.identifier == target.languageCode?.identifier
+        guard let translator, !sameLanguage else {
+            DostLog.log("translate skipped: translator=\(translator == nil ? "nil" : "ok") sameLanguage=\(sameLanguage)")
+            return segments.map { SubtitleCue(start: $0.start, end: $0.end, text: $0.text) }
+        }
+
+        let lines = segments.map(\.text)
+        let context = await MainActor.run { self.recentSourceContext(before: segments[0].start) }
+        do {
+            let translated = try await translator.translate(lines: lines,
+                                                            context: context,
+                                                            from: sourceLang,
+                                                            to: target)
+            guard translated.count == segments.count else {
+                DostLog.log("translate count mismatch: \(translated.count) vs \(segments.count)")
+                // 개수가 안 맞으면 매칭이 어긋난 자막을 보여주느니 원문을 쓴다.
+                return segments.map { SubtitleCue(start: $0.start, end: $0.end, text: $0.text) }
+            }
+            return zip(segments, translated).map {
+                SubtitleCue(start: $0.0.start, end: $0.0.end, text: $0.1, sourceText: $0.0.text)
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            DostLog.log("translate FAILED: \(error.localizedDescription)")
+            // 번역 실패는 치명적이지 않다 — 원문 자막이라도 보여준다.
+            return segments.map { SubtitleCue(start: $0.start, end: $0.end, text: $0.text) }
+        }
+    }
+
+    /// 같은 대사가 시작 시각만 몇십 밀리초 다른 채로 여러 번 들어오는 경우가 있다.
+    /// 분석기가 같은 구간을 다듬어 다시 내보내거나 창이 겹칠 때 생기는데, 상류에서
+    /// 완벽히 막기 어려우니 큐 단위에서 한 번 더 거른다. 한쪽이 다른 쪽을 포함하는
+    /// 경우("これがこれが最後か" vs "これが最後か")도 같은 대사로 본다.
+    private func isDuplicate(_ cue: SubtitleCue) -> Bool {
+        let window: TimeInterval = 2.0
+        let candidate = cue.sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !candidate.isEmpty else { return true }
+        return cues.contains { existing in
+            guard abs(existing.start - cue.start) < window else { return false }
+            let other = existing.sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return other == candidate || other.contains(candidate) || candidate.contains(other)
+        }
+    }
+
+    /// 번역 문맥으로 넘길 직전 원문 몇 줄.
+    private func recentSourceContext(before start: TimeInterval, count: Int = 3) -> [String] {
+        cues.filter { $0.start < start }.suffix(count).map(\.sourceText)
+    }
+
+    private func makeTranslator() -> (any SubtitleTranslating)? {
+        switch backend {
+        case .apple:
+            return AppleTranslator()
+        case .claude:
+            guard let key = ClaudeAPIKeyStore.load() else { return nil }
+            return ClaudeTranslator(model: claudeModel, apiKey: key)
+        }
+    }
+
+    private func resolvedSourceLocale() -> Locale {
+        if let sourceLocale { return sourceLocale }
+        if let first = Locale.preferredLanguages.first { return Locale(identifier: first) }
+        return Locale(identifier: "en-US")
+    }
+
+    // MARK: - 캐시
+
+    /// 캐시는 SRT 가 아니라 JSON 이다. SRT 로 저장하면 "어디까지 만들었는지"를 담을 수 없어서
+    /// 중간에 구멍이 뚫린 캐시가 전체 커버리지를 주장해 버린다(그러면 재생해도 영영 안 채워진다).
+    /// version 은 생성 알고리즘이 바뀔 때 올린다 — 옛 결과가 눌러앉는 걸 막는다.
+    private struct CachedSubtitles: Codable {
+        var version: Int
+        /// 만들어 둔 구간들. [[start, end], …]
+        var covered: [[TimeInterval]]
+        var cues: [SubtitleCue]
+    }
+    private static let cacheFormatVersion = 1
+
+    /// 캐시 위치: ~/Library/Application Support/24dost/subtitles/<hash>.<lang>.<engine>.json
+    /// 원본 폴더를 건드리지 않으려고 앱 지원 폴더에 둔다.
+    private func cacheURL() -> URL? {
+        guard let sourceURL else { return nil }
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        guard let dir = base?.appendingPathComponent("24dost/subtitles", isDirectory: true) else { return nil }
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        // 경로 + 파일 크기로 키를 만든다 (같은 이름 다른 파일 구분).
+        var keySource = sourceURL.absoluteString
+        if sourceURL.isFileURL,
+           let attrs = try? FileManager.default.attributesOfItem(atPath: sourceURL.path),
+           let size = attrs[.size] as? NSNumber {
+            keySource += "|\(size.int64Value)"
+        }
+        let digest = SHA256.hash(data: Data(keySource.utf8))
+        let hash = digest.map { String(format: "%02x", $0) }.joined().prefix(20)
+        let lang = targetLanguage.languageCode?.identifier ?? "xx"
+        return dir.appendingPathComponent("\(hash).\(lang).\(backend.rawValue).json")
+    }
+
+    private func loadCache() -> (cues: [SubtitleCue], covered: [(start: TimeInterval, end: TimeInterval)])? {
+        guard let url = cacheURL(),
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode(CachedSubtitles.self, from: data),
+              decoded.version == Self.cacheFormatVersion,
+              !decoded.cues.isEmpty else { return nil }
+        let covered = decoded.covered
+            .filter { $0.count == 2 && $0[1] > $0[0] }
+            .map { (start: $0[0], end: $0[1]) }
+        return (decoded.cues, covered)
+    }
+
+    /// 일정 개수 이상 쌓였을 때만 디스크에 쓴다 (매 창마다 쓰면 I/O 낭비).
+    /// 임계값이 높으면 대사가 드문 영상에서 앱을 닫을 때 만든 걸 통째로 날린다.
+    private func persistCacheIfNeeded(force: Bool) {
+        guard !cues.isEmpty, let url = cacheURL() else { return }
+        let grown = cues.count - lastPersistedCount
+        guard force || grown >= 4 else { return }
+        let payload = CachedSubtitles(version: Self.cacheFormatVersion,
+                                      covered: coveredRanges.map { [$0.start, $0.end] },
+                                      cues: cues)
+        if let data = try? JSONEncoder().encode(payload) {
+            try? data.write(to: url, options: .atomic)
+            lastPersistedCount = cues.count
+        }
+    }
+
+    /// 세션이 끝날 때 남은 자막을 디스크에 밀어 넣는다.
+    func flushCache() { persistCacheIfNeeded(force: true) }
+
+    /// 생성된 자막을 영상 옆에 .srt 로 내보낸다 (⇧⌘E).
+    @discardableResult
+    func exportSRT() -> URL? {
+        guard !cues.isEmpty, let sourceURL, sourceURL.isFileURL else { return nil }
+        let lang = targetLanguage.languageCode?.identifier ?? "sub"
+        let out = sourceURL.deletingPathExtension().appendingPathExtension("\(lang).srt")
+        do {
+            try SubtitleFile.srtString(from: cues).write(to: out, atomically: true, encoding: .utf8)
+            return out
+        } catch {
+            return nil
+        }
+    }
+}
