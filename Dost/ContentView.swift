@@ -1733,8 +1733,15 @@ struct ContentView: View {
                     let clickedRowIdx = Int((point.y - offsetY) / grid)
                     
                     if clickedColIdx >= 1 && clickedColIdx <= visibleCols {
-                        // 우상단 우클릭이라면 (1번 row, 마지막 col) 피크영역이므로 점프하지 않음
-                        if clickedColIdx == visibleCols && clickedRowIdx == 1 {
+                        // 피크 도트 자리는 점프시키지 않는다. 위치를 (1, cols-2) 로 가정하면
+                        // 안 된다 — 도트 간격을 30 아래로 좁히면 모서리 마스크가 켜지면서
+                        // 실제 앵커가 안쪽으로 밀린다. 렌더와 같은 계산을 그대로 쓴다.
+                        let layout = makeDotGridLayout(
+                            size: size, grid: grid, dotDiameter: sampler.dotDiameter,
+                            rowsOverride: rows, colsOverride: cols, isFullscreen: isFullscreen
+                        )
+                        if let anchor = layout.findTopRightAnchor(),
+                           clickedColIdx == anchor.col, clickedRowIdx == anchor.row {
                             return
                         }
                         // 1부터 visibleCols 까지의 값을 해당 컬럼의 정중앙 시간(0.5 오프셋)으로 매핑하여 깜빡임과 인덱싱 일치
