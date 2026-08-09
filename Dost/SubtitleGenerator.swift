@@ -766,6 +766,11 @@ final class SubtitleGenerator: ObservableObject {
             guard parts.count == 4, parts[0] == hash else { continue }
             let langs = parts[1].split(separator: "_")
             guard langs.count == 2 else { continue }   // 옛 형식(<해시>.<대상>.<엔진>)은 건너뛴다
+            // **인식 언어가 다를 때만 물어본다.** 이 프롬프트는 "인식 언어를 잘못 잡았다"를
+            // 잡으려는 것이다. 도착어만 다른 건(ja→ko 를 만들어 두고 ja→de 로 바꾼 경우)
+            // 사용자가 의도한 정상 동작인데, 여기서 걸러내지 않으면 "USE JAPANESE?" 를
+            // 띄우고 USE 를 누르면 도착어까지 되돌려 버린다.
+            guard String(langs[0]) != resolvedSourceLocale().identifier(.bcp47) else { continue }
             // 내용이 비어 있으면 물어볼 값이 없다.
             guard let data = try? Data(contentsOf: f),
                   let decoded = try? JSONDecoder().decode(CachedSubtitles.self, from: data),
