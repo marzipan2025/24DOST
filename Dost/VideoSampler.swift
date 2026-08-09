@@ -161,6 +161,8 @@ class VideoSampler: ObservableObject {
     private let overlayDuration: TimeInterval = 0.5
 
     var currentDisplaySize: CGSize = .zero
+    /// 전체화면 여부. 도트 격자를 창에 꽉 채울지(창 모드) 비율을 지킬지(전체화면) 가른다.
+    var isFullscreen: Bool = false
 
     // 점 크기/간격 (w,s,a,d,z 키로 조절)
     // 제약: dotDiameter ≥ 8, gridSize ≥ dotDiameter + minGap
@@ -1339,51 +1341,75 @@ class VideoSampler: ObservableObject {
         let dispW = currentDisplaySize.width  > 0 ? currentDisplaySize.width  : CGFloat(bufWidth)  / 2
         let dispH = currentDisplaySize.height > 0 ? currentDisplaySize.height : CGFloat(bufHeight) / 2
 
-        // 원본 비율 보존: 디스플레이 영역 안에 비디오를 fit-inside로 맞춘 뒤 그 영역으로 셀 수를 계산.
-        // cols/rows 비율이 원본에 맞춰지므로 가로/세로 샘플링 stride가 같아져 왜곡 없음.
-        // 남는 공간은 자동 레터박스(여백).
-        let videoAspect = CGFloat(bufWidth) / CGFloat(bufHeight)
-        let fittedW: CGFloat
-        let fittedH: CGFloat
-        if dispW / dispH > videoAspect {
-            // 창이 비디오보다 가로로 넓음 → 좌우에 여백(필러박스)
-            fittedH = dispH
-            fittedW = fittedH * videoAspect
-        } else {
-            // 창이 비디오보다 세로로 김 → 상하에 여백(레터박스)
-            fittedW = dispW
-            fittedH = fittedW / videoAspect
-        }
-
-        // 콘텐츠 줌: fit 대비 배율만큼 확대하고, 화면 밖으로 넘치는 부분은 중앙 크롭.
-        // 확대되어도 그리드/도트 크기는 그대로 — 버퍼에서 샘플링하는 소스 영역만 줄어든다.
+        // 격자는 **창 전체**를 채운다.
+        //
+        // 예전에는 창 안에 비디오를 fit-inside 로 맞춘 영역에서 셀 수를 뽑아, 창 비율이
+        // 영상과 다르면 도트가 가운데 띠에만 나왔다. 그러면 피크(영상은 창을 꽉 채움)와
+        // 도트 모드의 화면이 어긋나고, 자막 앵커가 창 하단이 아니라 그 띠의 하단에
+        // 붙어서 피크로 넘어가면 자막이 화면 한가운데 뜬다.
+        //
+        // 이제 셀 수를 창 크기에서 뽑고, 원본에서 **창 비율에 맞는 중앙 영역만** 읽는다.
+        // 넘치는 가장자리는 잘린다 — 피크가 영상을 채우는 방식과 똑같아서, 두 모드가
+        // 같은 화면을 보여준다.
+        //
+        // 늘리는 방식(원본 전체를 격자에 억지로 매핑)은 쓰면 안 된다. 점 하나가 그
+        // 위치의 색을 가져오는 구조라, 점을 작고 촘촘하게 할수록 도트가 이미지에
+        // 가까워지고 그러면 늘어난 그림이 그대로 드러난다.
+        // (오디오 모드는 원래부터 창 전체 기준이라 이걸로 서로 일관돼진다.)
+        let videoAspect  = CGFloat(bufWidth) / CGFloat(bufHeight)
         let zoom = effectiveZoom(dispW: dispW, dispH: dispH, videoAspect: videoAspect)
-        let scaledW = fittedW * zoom
-        let scaledH = fittedH * zoom
-        let visibleW = min(dispW, scaledW)
-        let visibleH = min(dispH, scaledH)
 
-        let cols = max(1, Int(visibleW / gridSize))
-        let rows = max(1, Int(visibleH / gridSize))
+        // 격자가 덮을 영역. 창 모드는 창 전체, 전체화면은 비율을 지킨 영역.
+        //
+        // 전체화면을 창 모드처럼 처리하면 안 된다 — 피크가 거기서는 .resizeAspect
+        // (레터박스)로 바뀌어 도트와 어긋나고, ⌘0(fit)/⌘1(fill)/핀치 줌이 전부
+        // "fit = 1.0" 을 기준으로 정의돼 있어서 fit 과 fill 이 구분되지 않게 된다.
+        let coverW: CGFloat
+        let coverH: CGFloat
+        if isFullscreen {
+            if dispW / dispH > videoAspect {
+                coverH = dispH; coverW = coverH * videoAspect
+            } else {
+                coverW = dispW; coverH = coverW / videoAspect
+            }
+        } else {
+            coverW = dispW; coverH = dispH
+        }
+        let coverAspect = coverW / coverH
 
-        let srcW = CGFloat(bufWidth)  * (visibleW / scaledW)
-        let srcH = CGFloat(bufHeight) * (visibleH / scaledH)
+        let cols = max(1, Int(min(dispW, coverW * max(1, zoom)) / gridSize))
+        let rows = max(1, Int(min(dispH, coverH * max(1, zoom)) / gridSize))
+
+        // 덮을 영역의 비율에 맞춘 중앙 크롭. 줌은 그 영역을 한 번 더 좁힌다.
+        var srcW: CGFloat
+        var srcH: CGFloat
+        if coverAspect > videoAspect {
+            srcW = CGFloat(bufWidth)                 // 덮을 영역이 더 넓다 → 위아래를 자름
+            srcH = srcW / coverAspect
+        } else {
+            srcH = CGFloat(bufHeight)                // 더 길다 → 좌우를 자름
+            srcW = srcH * coverAspect
+        }
+        srcW /= max(1, zoom)
+        srcH /= max(1, zoom)
         let srcX0 = (CGFloat(bufWidth)  - srcW) / 2
         let srcY0 = (CGFloat(bufHeight) - srcH) / 2
-
-        let strideX = max(1.0, srcW / CGFloat(cols))
-        let strideY = max(1.0, srcH / CGFloat(rows))
 
         var newColors: [[CGColor]] = []
         newColors.reserveCapacity(rows)
 
         for row in 0..<rows {
-            let sampleY = min(max(0, Int(srcY0 + (CGFloat(row) + 0.5) * strideY)), bufHeight - 1)
+            // stride 를 쓰지 않고 정규화해서 매핑한다. 예전처럼 `max(1.0, srcH/rows)` 로
+            // 잡으면, 행 수가 원본 세로 픽셀 수를 넘는 순간(세로로 긴 창 + 좁은 간격)
+            // 아래쪽 행이 전부 마지막 스캔라인을 읽어 화면 아래가 한 줄로 뭉개진다.
+            let sampleY = min(max(0, Int(srcY0 + (CGFloat(row) + 0.5) / CGFloat(rows) * srcH)),
+                              bufHeight - 1)
             var rowColors: [CGColor] = []
             rowColors.reserveCapacity(cols)
 
             for col in 0..<cols {
-                let sampleX = min(max(0, Int(srcX0 + (CGFloat(col) + 0.5) * strideX)), bufWidth - 1)
+                let sampleX = min(max(0, Int(srcX0 + (CGFloat(col) + 0.5) / CGFloat(cols) * srcW)),
+                                  bufWidth - 1)
                 let offset  = sampleY * bytesPerRow + sampleX * 4
                 let ptr = baseAddress.advanced(by: offset).assumingMemoryBound(to: UInt8.self)
 

@@ -2001,11 +2001,13 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
             isFullscreen = true
+            sampler.isFullscreen = true
             cursorHider.start()
             sampler.backgroundDotAlpha = (fullscreenBackgroundStyle == .black) ? 0.10 : 0.40
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
             isFullscreen = false
+            sampler.isFullscreen = false
             cursorHider.stop()
             // 풀스크린 전에 항상 위가 켜져 있었다면 복원
             if isAlwaysOnTop { applyAlwaysOnTop(true) }
