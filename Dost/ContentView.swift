@@ -776,7 +776,7 @@ private struct DotsOverlayView: View {
 
         // 오버레이 텍스트 소스 결정.
         // 우선순위(높→낮): URL 편집 → 재생 정보 → 자막 프롬프트 → 모드 레이블 → 플레이스홀더 → 자막
-        let overlayRawText: String
+        var overlayRawText: String
         let overlayIsSubtitle: Bool
         let preserveLineBreaks: Bool
         if isEditingURL {
@@ -808,6 +808,18 @@ private struct DotsOverlayView: View {
             overlayIsSubtitle = false
             preserveLineBreaks = false
         }
+
+        // 한글을 완성형으로 모아 준다.
+        //
+        // APFS 는 파일명을 **자모 분해(NFD)** 로 저장한다 — "시간제" 가 파일명에서는
+        // U+1109 U+1175 U+1100 U+1161 U+11AB U+110C U+1166 일곱 개로 들어 있다.
+        // 코레일체에는 조합용 자모(U+1100–11FF) 글리프가 아예 없어서 시스템 폴백으로
+        // 넘어가고, 그 폰트는 자모를 합치지 않고 낱자로 그린다. ⌘I 파일명이
+        // "ㅅㅣㄱㅏㄴㅈㅔ" 로 흩어져 보이던 원인이다.
+        //
+        // 폭 측정과 렌더가 같은 문자열을 써야 하므로 **여기 한 곳에서** 정규화한다.
+        // 이미 완성형인 문자열에는 아무 영향이 없다.
+        overlayRawText = overlayRawText.precomposedStringWithCanonicalMapping
 
         // 우측 블록 레이블.
         // - URL 편집: 입력 없음 "CANCEL" / 입력 있음 "X  GO"
