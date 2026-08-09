@@ -388,7 +388,15 @@ final class SubtitleGenerator: ObservableObject {
                 let raw = try await self.transcriber.transcribe(asset: asset,
                                                                 timeRange: range,
                                                                 locale: locale)
-                try Task.checkCancellation()
+                // 여기서부터는 취소를 확인하지 않는다.
+                //
+                // 인식이 끝난 순간 그 결과는 재생 위치와 무관하게 유효한 데이터다. 탐색
+                // 때문에 취소됐다고 버리면, 비싼 작업을 다 해놓고 결과만 내다 버리는 셈이다.
+                // 번역이 4~13초까지 걸리는 동안 사용자가 한 번만 움직여도 그 창이 통째로
+                // 날아가서, 자주 탐색하면 자막이 아예 안 쌓인다.
+                //
+                // 밀려난 작업인지는 아래 MainActor 블록에서 세대 번호로 가린다. 결과는
+                // 저장하되 다음 창을 고르는 흐름만 건드리지 않는다.
                 DostLog.log(String(format: "transcribed %d segments for %.1f-%.1fs", raw.count, windowStart, windowEnd))
 
                 // 겹침 구간에서 이미 만든 큐와 중복되는 세그먼트를 버린다.
@@ -406,7 +414,6 @@ final class SubtitleGenerator: ObservableObject {
                                                                   translator: translator,
                                                                   locale: locale,
                                                                   target: target)
-                try Task.checkCancellation()
 
                 await MainActor.run {
                     // 내 세대가 아니면 이미 밀려난 작업이다. 결과만 챙기고 흐름은 건드리지 않는다.
@@ -417,7 +424,7 @@ final class SubtitleGenerator: ObservableObject {
                             }
                             if !translated.isEmpty { self.markCovered(from: boundary, to: nextCovered) }
                         }
-                        DostLog.log("stale job gen=\(generation) 무시 (현재 \(self.jobGeneration))")
+                        DostLog.log("stale job gen=\(generation): 결과는 저장, 흐름은 현재 작업(gen=\(self.jobGeneration))에 맡김")
                         return
                     }
 
