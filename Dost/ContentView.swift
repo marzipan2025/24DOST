@@ -1524,6 +1524,8 @@ struct ContentView: View {
     }
     /// 우상단 도트를 누르고 있는 동안 true. onChanged가 연속 발생하므로 idempotent하게 갱신.
     @State private var isPeeking = false
+    /// 커서가 피크 도트 위에 있는지. 릴리즈로 끝낼지 판단하는 데 쓴다.
+    @State private var isCursorOverPeekDot = false
     /// 항상 위 (floating window level). 풀스크린 중에는 시각적으로 비활성.
     @State private var isAlwaysOnTop = false
     /// 풀스크린 재생 중 잠자기 방지 토큰. nil = 방지 비활성.
@@ -2116,6 +2118,11 @@ struct ContentView: View {
             cursorHider.start()
             sampler.backgroundDotAlpha = (fullscreenBackgroundStyle == .black) ? 0.10 : 0.40
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
+            // 다른 앱으로 넘어가면 hover 가 안 빠질 수 있다. 안전하게 끝낸다.
+            isCursorOverPeekDot = false
+            endPeekIfNeeded()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
             isFullscreen = false
             sampler.isFullscreen = false
@@ -2548,10 +2555,22 @@ struct ContentView: View {
                     .position(x: c.x, y: c.y)
                     .onTapGesture { togglePeek() }
             } else {
+                // 누르면 시작, **커서가 도트를 벗어나면** 끝난다.
+                //
+                // 예전에는 버튼을 놓을 때 끝났는데, 보는 내내 누르고 있어야 해서 불편했다.
+                // 이제 한 번 누르면 손을 떼도 계속 보이고, 커서를 치우면 도트로 돌아온다.
+                //
+                // 끝나는 조건을 롤아웃 하나에만 맡기면 갇힌다 — 전체화면에서는 커서가 2초 뒤
+                // 자동으로 숨는데, 숨은 채 도트 위에 있으면 hover 가 안 빠져서 영영 peek 이다.
+                // 그래서 커서가 이미 밖에 있는 상태의 릴리즈도 종료로 친다.
                 Color.clear
                     .contentShape(Rectangle())
                     .frame(width: grid, height: grid)
                     .position(x: c.x, y: c.y)
+                    .onHover { inside in
+                        isCursorOverPeekDot = inside
+                        if !inside { endPeekIfNeeded() }
+                    }
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { _ in
@@ -2562,7 +2581,7 @@ struct ContentView: View {
                                 }
                             }
                             .onEnded { _ in
-                                endPeekIfNeeded()
+                                if !isCursorOverPeekDot { endPeekIfNeeded() }
                             }
                     )
             }
