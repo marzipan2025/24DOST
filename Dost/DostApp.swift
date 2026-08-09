@@ -24,6 +24,8 @@ extension Notification.Name {
     /// 대기 화면 "Update →" 클릭 → 설정 창 Software Update 섹션 노출.
     static let revealSoftwareUpdate  = Notification.Name("revealSoftwareUpdate")
     static let clearSubtitleCacheRequested = Notification.Name("clearSubtitleCacheRequested")
+    /// ⌘X — 지금 보고 있는 영상에 대해 앱이 기록한 것을 전부 삭제.
+    static let clearCurrentMediaDataRequested = Notification.Name("clearCurrentMediaDataRequested")
     /// 설정 창이 스크롤을 마친 뒤 업데이트 확인(check)을 트리거.
     static let performSoftwareUpdateCheck = Notification.Name("performSoftwareUpdateCheck")
 }
@@ -301,6 +303,11 @@ struct DostApp: App {
                     NotificationCenter.default.post(name: .exportSubtitleRequested, object: nil)
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+
+                Button("Clear Data for This Video…") {
+                    NotificationCenter.default.post(name: .clearCurrentMediaDataRequested, object: nil)
+                }
+                .keyboardShortcut("x", modifiers: .command)
 
                 Button("Regenerate Auto Subtitles") {
                     NotificationCenter.default.post(name: .regenerateSubtitleRequested, object: nil)

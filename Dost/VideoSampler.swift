@@ -552,6 +552,26 @@ class VideoSampler: ObservableObject {
         return removed
     }
 
+    /// 지금 보고 있는 영상에 대해 만들어 둔 자막 캐시만 지운다.
+    /// 언어·엔진 조합을 가리지 않고 전부 걷어낸다. 지운 파일 수를 돌려준다.
+    func clearSubtitleCachesForCurrentMedia() -> Int {
+        guard let url = currentSourceURL else { return 0 }
+        let removed = SubtitleGenerator.clearCaches(for: url)
+        // 메모리에 들고 있는 큐도 같이 버린다. 안 그러면 파일만 지워지고 화면에는 그대로
+        // 남아서, 지웠다는 피드백과 보이는 것이 어긋난다. regenerate 가 아니라 discardAll
+        // 인 이유는, 지우자마자 다시 만들어 캐시를 되살리면 지운 게 아니기 때문이다.
+        generator.discardAll()
+        hasUsedGeneratedSubtitles = false
+        currentSubtitleTier = nil
+        currentSubtitle = ""
+        // 이 다음을 어떻게 할지는 **설정이 정한다** — 파일을 처음 열 때와 같은 규칙이다.
+        // Generate When No Subtitles Exist 가 켜져 있으면 곧바로 다시 쌓기 시작하고,
+        // 꺼져 있으면 사용자가 p 로 auto sub 에 들어올 때부터 쌓는다.
+        subtitleMode = (autoGenerateSubtitles && generator.canGenerate) ? .generated : .off
+        applySubtitleMode()
+        return removed
+    }
+
     private func applySubtitleMode() {
         let mode = effectiveSubtitleMode()
         DostLog.log("applySubtitleMode: requested=\(subtitleMode) effective=\(mode) canGen=\(generator.canGenerate) hasEmb=\(hasEmbeddedSubtitle) hasExt=\(hasExternalSubtitle)")

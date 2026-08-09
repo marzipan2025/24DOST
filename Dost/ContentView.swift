@@ -727,6 +727,9 @@ private struct DotsOverlayView: View {
     /// 프롬프트 문구. 사이드카 자막 검출이면 "SUBTITLE FOUND",
     /// 다른 언어로 만들어 둔 자막이 있으면 그 언어를 알린다.
     let promptMessage: String
+    /// 확인 버튼에 쓸 동사. 자막 프롬프트는 "USE", 삭제 확인은 "DELETE".
+    /// 되돌릴 수 없는 동작에 "USE" 가 뜨면 무엇에 동의하는지 흐려진다.
+    let promptConfirmLabel: String
     /// 재생 정보 오버레이. 파일명/시간 정보를 2줄로 표시한다.
     let playbackInfoTitle: String?
     let playbackInfoActive: Bool
@@ -846,7 +849,7 @@ private struct DotsOverlayView: View {
         } else if playbackInfoActive {
             rightText = "CLOSE"
         } else if subtitlePromptActive {
-            rightText = "X  USE"
+            rightText = "X  \(promptConfirmLabel)"
         } else {
             rightText = ""
         }
@@ -1438,6 +1441,8 @@ struct ContentView: View {
     @State private var subtitlePromptURL: URL? = nil
     /// 다른 언어로 만들어 둔 자막이 있을 때의 프롬프트. 생성은 답할 때까지 멈춘다.
     @State private var languagePrompt: (source: String, target: String)? = nil
+    /// ⌘X 삭제 확인 대기 중. 되돌릴 수 없으므로 반드시 한 번 묻는다.
+    @State private var mediaDataDeletePrompt = false
 
     /// 파일별로 마지막에 쓴 인식 언어. 인식 언어는 본래 **영상의 속성**인데 설정은
     /// 앱 전역이라, 언어가 다른 영상을 번갈아 보면 열 때마다 물어보게 된다.
@@ -1511,9 +1516,14 @@ struct ContentView: View {
     }
 
     /// 프롬프트가 떠 있는지. 두 종류가 같은 자리를 쓴다.
-    private var isPromptActive: Bool { subtitlePromptURL != nil || languagePrompt != nil }
+    private var isPromptActive: Bool {
+        subtitlePromptURL != nil || languagePrompt != nil || mediaDataDeletePrompt
+    }
+
+    private var promptConfirmLabel: String { mediaDataDeletePrompt ? "DELETE" : "USE" }
 
     private var promptMessage: String {
+        if mediaDataDeletePrompt { return "DELETE DATA?" }
         if let p = languagePrompt {
             // "SUBTITLE IN JAPANESE" 는 자막 글자가 일본어라는 뜻으로 읽힌다. 실제로는
             // 자막은 한국어이고 **인식에 쓴 언어**가 일본어다. 질문 형태로 두면
@@ -1904,6 +1914,7 @@ struct ContentView: View {
                 urlBuffer: urlBuffer,
                 subtitlePromptActive: isPromptActive,
                 promptMessage: promptMessage,
+                promptConfirmLabel: promptConfirmLabel,
                 playbackInfoTitle: currentPlaybackInfoTitle,
                 playbackInfoActive: isShowingPlaybackInfo,
                 isPeeking: isPeeking,
@@ -2121,7 +2132,13 @@ struct ContentView: View {
             sampler.backgroundDotAlpha = (fullscreenBackgroundStyle == .black) ? 0.10 : 0.40
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
-            // 다른 앱으로 넘어가면 마우스 이동 이벤트가 안 온다. 안전하게 끝낸다.
+            // 롤아웃 모드에서만 끝낸다. 그쪽은 "커서가 도트를 벗어나면 종료"인데 다른 앱으로
+            // 넘어가면 마우스 이동 이벤트가 안 와서, 안 끝내면 peek 에 갇힌다.
+            //
+            // tap to peek 은 반대다. 한 번 눌러 켜고 다시 눌러 끄는 **명시적 토글**이라
+            // 커서 위치에 의존하지 않는다. 여기서 같이 끝내면 다른 앱을 잠깐 보고 돌아왔을 때
+            // 멋대로 도트로 돌아가 있다.
+            guard !tapToPeek else { return }
             endPeekIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
@@ -2158,6 +2175,9 @@ struct ContentView: View {
                                      onChange: syncSourceLanguageWithMedia))
         .onChange(of: subtitleSettingsSignature) { oldValue, newValue in
             handleSubtitleSettingsChange(from: oldValue, to: newValue)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .clearCurrentMediaDataRequested)) { _ in
+            requestClearCurrentMediaData()
         }
         .onReceive(NotificationCenter.default.publisher(for: .clearSubtitleCacheRequested)) { _ in
             let n = sampler.clearAllSubtitleCaches()
@@ -2335,6 +2355,11 @@ struct ContentView: View {
     }
 
     private func acceptSubtitlePrompt() {
+        if mediaDataDeletePrompt {
+            mediaDataDeletePrompt = false
+            performClearCurrentMediaData()
+            return
+        }
         // 다른 언어 자막을 쓰겠다고 한 경우: 언어 설정을 그쪽으로 옮긴다.
         // 설정이 바뀌면 생성기가 그 조합으로 다시 붙으면서 해당 캐시를 읽는다.
         if let p = languagePrompt {
@@ -2352,6 +2377,10 @@ struct ContentView: View {
 
     /// 사용자가 X 거절 → 단순히 프롬프트만 닫음 (이번 세션 한정, 다음 파일 로드 시 재평가).
     private func dismissSubtitlePrompt() {
+        if mediaDataDeletePrompt {
+            mediaDataDeletePrompt = false
+            return
+        }
         if languagePrompt != nil {
             // 무시하고 지금 설정 그대로 생성을 시작한다.
             languagePrompt = nil
@@ -2366,7 +2395,7 @@ struct ContentView: View {
         if let g = computeURLInputGeometry(
             size: size, sampler: sampler,
             isFullscreen: isFullscreen,
-            rightText: "X  USE",
+            rightText: "X  \(promptConfirmLabel)",
             twoButton: true
         ) {
             ZStack(alignment: .topLeading) {
@@ -3150,11 +3179,60 @@ struct ContentView: View {
 
     /// 자막 파이프라인을 타고 0.6초간 노출되는 악센트 레이블.
     /// 모드 변경, 자막 OFF 등 일시적 알림에 공용.
-    private func showTransientAccentLabel(_ text: String) {
+    /// ⌘X — 이 영상에 대해 앱이 기록한 것을 전부 지운다.
+    ///
+    /// 지우는 것: 만들어 둔 생성 자막(언어·엔진 조합 전부), 저장된 재생 위치,
+    /// 이 영상에 대해 기억해 둔 인식 언어.
+    /// **최근 항목은 건드리지 않는다** — 그건 캐시가 아니라 무엇을 봤는지의 기록이고,
+    /// 지금 재생 중인 파일이라 지워도 곧바로 다시 들어간다.
+    private func requestClearCurrentMediaData() {
+        // 다른 프롬프트나 URL 입력 중이면 끼어들지 않는다.
+        guard !isEditingURL, !isPromptActive, !isShowingPlaybackInfo else { return }
+        guard sampler.currentSourceURL != nil else {
+            showTransientAccentLabel("NO VIDEO")
+            return
+        }
+        mediaDataDeletePrompt = true
+    }
+
+    private func performClearCurrentMediaData() {
+        let removedFiles = sampler.clearSubtitleCachesForCurrentMedia()
+
+        var removedOther = 0
+        if let key = currentPlaybackPositionKey {
+            if playbackPositions[key] != nil {
+                clearStoredPlaybackPosition(for: key)
+                removedOther += 1
+            }
+            var languages = rememberedSourceLanguages
+            if languages.removeValue(forKey: key) != nil {
+                rememberedSourceLanguages = languages
+                removedOther += 1
+            }
+        }
+
+        // 지운 결과는 화면에 드러나지 않는다. 이 문구가 유일한 확인이라 넉넉히 띄운다.
+        let feedbackSeconds = 1.6
+        if removedFiles == 0 && removedOther == 0 {
+            showTransientAccentLabel("NOTHING TO CLEAR", seconds: feedbackSeconds)
+        } else if removedFiles > 0 {
+            let unit = removedFiles == 1 ? "FILE" : "FILES"
+            showTransientAccentLabel("DATA CLEARED (\(removedFiles) \(unit))", seconds: feedbackSeconds)
+        } else {
+            showTransientAccentLabel("DATA CLEARED", seconds: feedbackSeconds)
+        }
+    }
+
+    /// 짧게 떴다 사라지는 안내 문구.
+    ///
+    /// 기본 0.6초는 배경 스타일 순환처럼 **방금 누른 것의 결과가 화면에 바로 보이는**
+    /// 경우에 맞춘 값이다. 결과가 화면에 안 보이는 동작(파일 삭제 같은)은 이 문구가
+    /// 유일한 확인이라 더 오래 둔다.
+    private func showTransientAccentLabel(_ text: String, seconds: Double = 0.6) {
         backgroundStyleLabel = text
         backgroundStyleLabelTask?.cancel()
         backgroundStyleLabelTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 600_000_000)
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             if !Task.isCancelled { backgroundStyleLabel = nil }
         }
     }

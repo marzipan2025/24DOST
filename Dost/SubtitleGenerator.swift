@@ -281,6 +281,21 @@ final class SubtitleGenerator: ObservableObject {
         if case .working = status { status = .idle }
     }
 
+    /// 만든 걸 버리고 **다시 만들지 않는다.** regenerate 와 달리 멈춘 채로 둔다.
+    /// ⌘X(이 영상 데이터 삭제)용 — 지우자마자 되살아나면 지운 게 아니다.
+    /// 다시 시작할지는 호출부가 자막 모드로 정한다.
+    func discardAll() {
+        stop()
+        cues = []
+        coveredRanges = []
+        provisionalRanges = []
+        pendingRefine = []
+        recognizedSegments = []
+        recognizedCoverage = []
+        lastPersistedCount = 0
+        status = .idle
+    }
+
     /// 만든 걸 버리고 처음부터 다시 만든다.
     func regenerate() {
         currentJob?.cancel()
@@ -713,15 +728,7 @@ final class SubtitleGenerator: ObservableObject {
         guard let dir = base?.appendingPathComponent("24dost/subtitles", isDirectory: true) else { return nil }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        // 경로 + 파일 크기로 키를 만든다 (같은 이름 다른 파일 구분).
-        var keySource = sourceURL.absoluteString
-        if sourceURL.isFileURL,
-           let attrs = try? FileManager.default.attributesOfItem(atPath: sourceURL.path),
-           let size = attrs[.size] as? NSNumber {
-            keySource += "|\(size.int64Value)"
-        }
-        let digest = SHA256.hash(data: Data(keySource.utf8))
-        let hash = digest.map { String(format: "%02x", $0) }.joined().prefix(20)
+        let hash = Self.cacheKeyHash(for: sourceURL)
         // **인식 언어도 키에 넣는다.** 대상 언어와 엔진은 원래 들어 있었는데 인식 언어만
         // 빠져 있었다. 그래서 언어를 잘못 잡고 만든 쓰레기 자막이, 설정을 고쳐도 같은
         // 파일에서 그대로 다시 읽혀 남아 있었다(커버리지가 "다 만듦"이라 재생성도 안 된다).
@@ -909,6 +916,38 @@ final class SubtitleGenerator: ObservableObject {
             return (String(langs[0]), String(langs[1]))
         }
         return nil
+    }
+
+    /// 영상 하나를 가리키는 캐시 키. 경로 + 파일 크기로 만든다 (같은 이름 다른 파일 구분).
+    static func cacheKeyHash(for url: URL) -> String {
+        var keySource = url.absoluteString
+        if url.isFileURL,
+           let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let size = attrs[.size] as? NSNumber {
+            keySource += "|\(size.int64Value)"
+        }
+        let digest = SHA256.hash(data: Data(keySource.utf8))
+        return String(digest.map { String(format: "%02x", $0) }.joined().prefix(20))
+    }
+
+    static var cacheDirectory: URL? {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        return base?.appendingPathComponent("24dost/subtitles", isDirectory: true)
+    }
+
+    /// 영상 하나에 대해 만들어 둔 자막 캐시를 **언어·엔진 조합을 가리지 않고** 전부 지운다.
+    /// 파일명이 `<hash>.<src>_<dst>.<engine>.json` 이라 해시로 시작하는 것을 모두 걷어낸다.
+    /// 지운 파일 수를 돌려준다.
+    static func clearCaches(for url: URL) -> Int {
+        guard let dir = cacheDirectory,
+              let files = try? FileManager.default.contentsOfDirectory(at: dir,
+                                                                       includingPropertiesForKeys: nil) else { return 0 }
+        let prefix = cacheKeyHash(for: url) + "."
+        var removed = 0
+        for f in files where f.lastPathComponent.hasPrefix(prefix) && f.pathExtension == "json" {
+            if (try? FileManager.default.removeItem(at: f)) != nil { removed += 1 }
+        }
+        return removed
     }
 
     /// 생성 자막 캐시 폴더를 통째로 비운다. 지운 파일 수를 돌려준다.
