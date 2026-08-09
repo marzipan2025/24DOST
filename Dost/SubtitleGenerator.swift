@@ -739,12 +739,10 @@ final class SubtitleGenerator: ObservableObject {
     func exportSRT() -> URL? {
         guard !cues.isEmpty, let sourceURL, sourceURL.isFileURL else { return nil }
         let lang = targetLanguage.languageCode?.identifier ?? "sub"
-        // 앞에 [autosub] 를 붙여 사람이 만든 자막과 한눈에 구분되게 한다.
+        // 확장자 바로 앞에 .autosub 를 붙여 사람이 만든 자막과 구분한다.
         // 영상과 같은 폴더에 나란히 놓이므로 이름만으로 출처를 알 수 있어야 한다.
-        let base = "[autosub]" + sourceURL.deletingPathExtension().lastPathComponent
-        let out = sourceURL.deletingLastPathComponent()
-            .appendingPathComponent(base)
-            .appendingPathExtension("\(lang).srt")
+        let out = sourceURL.deletingPathExtension()
+            .appendingPathExtension("\(lang).autosub.srt")
         do {
             try SubtitleFile.srtString(from: cues).write(to: out, atomically: true, encoding: .utf8)
             return out
