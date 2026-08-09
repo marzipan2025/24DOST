@@ -36,6 +36,24 @@ macOS 도트 매트릭스 영상 플레이어. 영상을 도트 격자로 렌더
 | `SettingsWindowView.swift` | 설정 창 4개 탭, 소프트웨어 업데이터 |
 | `OpenMediaURLIntent.swift` | App Intents — 외부에서 URL 재생 요청 |
 
+### 2.1 창은 하나뿐이다 (중요)
+
+재생 창은 **`WindowGroup` 이 아니라 `Window` 씬**이다. 이 앱은 창이 여럿인 걸 감당하지
+못한다 — 키 입력을 받는 `NSEvent` 로컬 모니터가 창이 아니라 **앱 단위**라서 창마다 달린
+모니터가 모든 키를 다 받고, 파일 열기도 알림 방송이라 모든 창이 같은 영상으로 갈아탄다.
+최근 항목·재생 위치·자막 설정도 전부 앱 단위다.
+
+`Window` 씬이라서 따라오는 두 가지 처리:
+
+- 실행 중에 파일 열기 요청을 받으면 SwiftUI 가 창을 화면 밖으로 내린다(내용은 새 영상으로
+  정상 전환된 상태). `AppDelegate.presentPlaybackWindow()` 로 다시 올린다.
+- 그 순간을 "마지막 창이 닫혔다"고 보고 앱이 종료되면 안 되므로
+  `applicationShouldTerminateAfterLastWindowClosed` 는 **false**. 대신 ⌘W(Close Window)가
+  재생 창일 때 직접 `NSApp.terminate` 한다. 설정 창이 앞이면 설정 창만 닫는다.
+
+나중에 생긴 창을 닫는 방식은 쓰지 말 것 — 닫으면 SwiftUI 가 즉시 되살려서 닫기/되살리기가
+무한히 반복된다(0.0.5.13 작업 중 확인).
+
 ---
 
 ## 3. 재생

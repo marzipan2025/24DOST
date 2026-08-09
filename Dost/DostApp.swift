@@ -232,14 +232,37 @@ struct DostApp: App {
     @StateObject private var recents = RecentsStore()
 
     var body: some Scene {
-        WindowGroup {
+        // 재생 창은 하나만 쓴다. 여분의 창은 AppDelegate 가 즉시 닫는다 (enforceSingle...).
+        //
+        // 이 앱은 창을 여러 개 띄울 수 있는 구조가 아니다. 키 입력은 NSEvent 로컬 모니터로
+        // 받는데 그게 창이 아니라 **앱 단위**라 창마다 설치된 모니터가 모든 키를 다 받고,
+        // 파일 열기 요청도 알림 방송이라 모든 창이 같이 받아 전부 같은 영상으로 갈아탄다.
+        // 최근 항목·재생 위치·자막 설정도 전부 앱 단위다.
+        //
+        // Scene 을 Window 로 바꾸면 구조적으로 막히지만, 그렇게 하니 앱이 아예 뜨지
+        // 않았다(크래시 없이 조용히 종료). WindowGroup 을 그대로 두고 여분만 닫는다.
+        // **WindowGroup 이 아니라 Window** — 재생 창은 구조적으로 하나만 존재한다.
+        //
+        // WindowGroup 이면 Finder 에서 파일을 열 때마다 SwiftUI 가 창을 새로 만든다.
+        // 이 앱은 창이 여럿인 걸 감당하지 못한다: 키 입력을 받는 NSEvent 로컬 모니터가
+        // 창이 아니라 **앱 단위**라 창마다 달린 모니터가 모든 키를 다 받고, 파일 열기도
+        // 알림 방송이라 모든 창이 같은 영상으로 갈아탄다. ⌘W 도 어느 창을 닫는지 엉킨다.
+        // 나중에 생긴 창을 닫는 방식도 시도했지만, SwiftUI 가 닫은 창을 즉시 되살려
+        // 닫기/되살리기가 무한히 반복됐다. 그래서 창 생성 자체를 막는다.
+        Window("24DOST", id: "player-window") {
+            // .onOpenURL 을 달면 안 된다. 그걸 다는 순간 이 씬이 "파일 열기를 내가
+            // 처리한다"고 선언하는 셈이라, Finder 에서 파일을 열 때마다 SwiftUI 가 창을
+            // 하나씩 새로 만든다 — 창이 여럿이면 앱 단위인 키 모니터와 알림 방송 때문에
+            // 컨트롤이 뒤엉킨다. 파일 열기는 AppDelegate.application(_:open:) 이 받아
+            // 알림으로 뿌리므로, 열려 있던 창이 그대로 새 영상으로 갈아탄다.
             ContentView()
                 .environmentObject(recents)
-                .onOpenURL { incomingURL in
-                    AppDelegate.handleIncomingURLs([incomingURL])
-                }
         }
         .windowStyle(.hiddenTitleBar)
+        // 이게 없으면 이전 실행의 "창 닫힘" 상태가 복원되어, 창이 하나도 없는 채로 떠서
+        // applicationShouldTerminateAfterLastWindowClosed 로 앱이 즉시 조용히 종료된다.
+        .defaultLaunchBehavior(.presented)
+        .restorationBehavior(.disabled)
 
         Window("Settings", id: "settings-window") {
             SettingsWindowView()
@@ -315,7 +338,14 @@ struct DostApp: App {
                 // 않는다. 창을 여러 개 띄웠을 때 하나만 닫을 방법이 없어서 직접 넣는다.
                 // keyWindow 우선 — 설정 창이 앞이면 설정 창이 닫힌다.
                 Button("Close Window") {
-                    (NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil)
+                    let target = NSApp.keyWindow ?? NSApp.mainWindow
+                    // 설정 창이 앞이면 그것만 닫는다. 재생 창은 하나뿐이라 닫는 것 = 앱 종료.
+                    // (마지막 창이 닫혀도 앱이 살아남게 해 뒀으므로 직접 종료시켜야 한다.)
+                    if let target, AppDelegate.isSettingsWindow(target) {
+                        target.performClose(nil)
+                    } else {
+                        NSApp.terminate(nil)
+                    }
                 }
                 .keyboardShortcut("w", modifiers: .command)
             }
@@ -370,6 +400,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     static func isPlaybackWindow(_ window: NSWindow) -> Bool {
         !isSettingsWindow(window) && window.contentView != nil
     }
+
+    /// 유일한 재생 창.
+    static weak var primaryPlaybackWindow: NSWindow?
+
+    /// 재생 창을 다시 화면에 올린다.
+    ///
+    /// Window 씬은 실행 중에 파일 열기 요청을 받으면 창을 화면 밖으로 내려버린다
+    /// (내용은 멀쩡히 새 영상으로 갈아탄 상태다). 그대로 두면 창이 사라진 것처럼 보이고,
+    /// 마지막 창이 닫힌 것으로 쳐서 앱이 종료되기까지 한다. 그래서 다시 올려준다.
+    @MainActor
+    static func presentPlaybackWindow() {
+        let window = primaryPlaybackWindow
+            ?? NSApplication.shared.windows.first { isPlaybackWindow($0) && !$0.title.isEmpty }
+        guard let window else { return }
+        primaryPlaybackWindow = window
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    /// 닫아도 되는 "진짜" 재생 창인지. isPlaybackWindow 는 스타일 적용용이라 느슨해서
+    /// (설정창이 아니고 contentView 만 있으면 참) 시스템 보조 창까지 걸릴 수 있다.
+    /// 창을 **닫는** 판단에는 이 엄격한 쪽만 쓴다.
+
 
     @MainActor
     static func applyStyleToCurrentWindowIfNeeded() {
@@ -458,6 +510,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.async {
             guard let window = NSApplication.shared.windows.first(where: Self.isPlaybackWindow) else { return }
             window.delegate = self
+            Self.primaryPlaybackWindow = window
             Self.applyStyle(window)
             // 매 실행마다 480x320으로 시작. 창은 화면 중앙에 배치.
             let size = CGSize(width: 480, height: 320)
@@ -594,6 +647,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     static func applyStyle(_ window: NSWindow) {
         guard isPlaybackWindow(window) else { return }
         // .titled를 유지해야 키보드(엔터, 스페이스바 등) 이벤트와 키 윈도우 포커스가 정상 작동합니다.
+        // .closable 은 넣지 않는다. 넣으면 AppKit 이 File 메뉴에 Close / Close All 을
+        // 끼워 넣는데, 그것들은 창을 내리기만 해서 창 없이 앱만 살아 있는 상태가 된다.
+        // ⌘W 는 Close Window 명령이 직접 종료시키므로 .closable 이 필요 없다.
         var newStyleMask: NSWindow.StyleMask = [.titled, .fullSizeContentView, .resizable]
         if window.styleMask.contains(.fullScreen) {
             newStyleMask.insert(.fullScreen)
@@ -674,6 +730,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !fileURLs.isEmpty || !mediaRequests.isEmpty else { return }
 
         let post: () -> Void = {
+            // 창을 다시 화면에 올린다. 두 번(즉시 + 조금 뒤) 하는 건 SwiftUI 가 이벤트를
+            // 처리하면서 한 번 더 내려버리는 타이밍이 있기 때문.
+            for delay in [0.0, 0.35] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    MainActor.assumeIsolated { presentPlaybackWindow() }
+                }
+            }
             if !fileURLs.isEmpty {
                 NotificationCenter.default.post(
                     name: .externalOpenURLs,
@@ -695,7 +758,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// 여기서 true 를 주면 안 된다. Window 씬은 파일 열기 때 창을 잠깐 내리는데,
+    /// 그 순간을 "마지막 창이 닫혔다"고 보고 앱이 통째로 종료돼 버린다.
+    /// 사용자가 직접 닫는 경우(⌘W)는 Close Window 명령이 직접 종료시킨다.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Dock 아이콘 클릭 등으로 되돌아왔을 때 창이 내려가 있으면 다시 올린다.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { Self.presentPlaybackWindow() }
+        return true
+    }
 
     /// Finder "Open With…" / 파일 더블클릭 / `open` 커맨드 / 커스텀 URL 스킴 진입점.
     /// 파일 URL 은 플레이리스트 로직으로, 앱 전용 스킴은 직접 재생 가능한 미디어 URL 문자열로 브로드캐스트한다.
