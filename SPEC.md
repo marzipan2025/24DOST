@@ -192,7 +192,7 @@ Claude 쪽 주의:
 
 ### 5.5 진단용 색 표시
 
-**Adaptive Subtitle Color를 끄면** 자막을 만든 창 등급이 색으로 드러난다.
+**Adaptive Subtitle Color를 끄면** 자막을 만든 창 등급이 색으로 드러난다. **생성 자막에만 적용된다** — 외부·내장 자막은 우리가 만든 게 아니라 등급이라는 개념이 없으므로 평소 색으로 그린다(`currentSubtitleTier`가 nil).
 
 | 색 | 등급 |
 |---|---|

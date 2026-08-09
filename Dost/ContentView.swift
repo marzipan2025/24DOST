@@ -967,9 +967,10 @@ private struct DotsOverlayView: View {
                 // 진단 표시: Adaptive Subtitle Color 를 끄면 자막을 만든 창 길이가 색으로
                 // 드러난다. 정교화가 진행될수록 형광 녹색이 늘어난다.
                 switch sampler.currentSubtitleTier {
-                case SubtitleTier.urgent: overlayColor = fixedOverlayColor      // 60초
-                case SubtitleTier.fine:   overlayColor = subtitleTierFineColor  // 600초
-                default:                  overlayColor = accentColor            // 180초
+                case SubtitleTier.urgent?: overlayColor = fixedOverlayColor      // 60초
+                case SubtitleTier.fine?:   overlayColor = subtitleTierFineColor  // 600초
+                case .some:                overlayColor = accentColor            // 180초
+                case nil:                  overlayColor = fixedOverlayColor      // 외부·내장 자막
                 }
             } else {
                 overlayColor = adaptiveColor(sR: sampR, sG: sampG, sB: sampB, n: sampN,
