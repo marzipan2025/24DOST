@@ -161,7 +161,7 @@ Claude 쪽 주의:
   "look-ahead 안쪽"만 보면 안 된다 — 백필(재생 위치보다 **뒤쪽** 빈 구간 메우기)은 frontier가 playhead보다 작아서 그 조건을 항상 통과한다. 제일 안 급한 작업이 전부 짧은 창으로 처리된다. 실제로 그렇게 짜 놓고 재 보니 전체의 70%가 urgent로 분류됐고, 고친 뒤 11.6%가 됐다.
 - 창 앞에 **2.5초 겹침**을 덧댄다. 분석기가 달리기 시작할 구간을 줘서 경계 첫 마디가 잘리는 걸 막는다. 이 구간의 세그먼트는 경계 필터가 걷어낸다.
 - 창 끝에 딱 붙어 끝나는 세그먼트는 말이 잘렸을 가능성이 커서 버리고, 다음 창을 그 세그먼트 시작점부터 다시 읽는다.
-- **Fast Response Range**(설정, 기본 20초 / 5·10·20·40초)는 위 판정에만 쓴다. 이 범위 안쪽은 빠른 응답을 우선해 짧은 창을, 바깥은 품질을 우선해 긴 창을 쓴다.
+- **Fast Response Range**(설정, 기본 40초 / 5·10·20·40초)는 위 판정에만 쓴다. 이 범위 안쪽은 빠른 응답을 우선해 짧은 창을, 바깥은 품질을 우선해 긴 창을 쓴다.
   **넓힐수록 품질이 나빠진다.** 짧은 창으로 만드는 구간이 늘어나기 때문이다. 예전 이름 `Look Ahead`("이만큼 앞서면 멈춘다")는 전체 미리 생성을 넣으면서 뜻을 잃었는데 이름만 남아, 값을 올리면 더 많이 준비된다고 오해하기 쉬웠다. 0.0.4.9에서 이름과 설명을 실제 동작에 맞추고 80초 항목을 뺐다.
 - 생성은 이 값과 무관하게 **파일 끝까지 계속된다.** 재생 위치 이후가 우선이고, 끝까지 다 차면 앞으로 돌아가 건너뛴 구간을 메운다. 실측 실시간의 약 3.5배 속도라 2시간 영화가 30분 남짓이면 전부 찬다.
 
@@ -327,7 +327,7 @@ SRT가 아니라 JSON인 이유는 **"어디까지 만들었는지"를 담아야
 > **Spoken Language 에 Auto 는 없다.** 예전에 있던 Auto 는 감지가 아니라 시스템 선호 언어의 첫 번째를 쓰는 것이었다 — 한국어 맥에서 일본어 영상을 틀면 한국어로 인식을 시도해 쓰레기 자막이 나왔다. 이름이 하는 일과 달라 오해를 부르므로 없앴다. 목록도 지역 변종을 추려 13개로 줄였다(중국어는 Cantonese/Mandarin, 영어는 UK/US, 포르투갈어는 브라질/포르투갈, 스페인어는 스페인/멕시코, 나머지는 본토 하나씩).
 
 - **Display** — Adaptive Subtitle Color, Subtitle Backdrop While Peeking
-- **Automatic Subtitles** — Generate When No Subtitles Exist, Spoken Language, Translate Into, Fast Response Range(5/10/20/40초)
+- **Automatic Subtitles** — Generate When No Subtitles Exist, Spoken Language, Translate Into, Fast Response Range(5/10/20/40초, 기본 40)
 - **Translation Engine** — Engine(Apple/Claude), Model, API Key
 
 ### Shortcuts / Licences

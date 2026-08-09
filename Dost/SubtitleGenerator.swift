@@ -70,7 +70,7 @@ enum SubtitleDefaults {
         sourceLanguageChoices.first { $0.value.caseInsensitiveCompare(bcp47) == .orderedSame }?.label ?? bcp47
     }
     static let defaultClaudeModel = "claude-haiku-4-5"
-    static let defaultFastResponse: Double = 20
+    static let defaultFastResponse: Double = 40
 }
 
 // MARK: - Generator
