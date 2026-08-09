@@ -135,6 +135,12 @@ final class SubtitleGenerator: ObservableObject {
     /// 캐시에는 쓰지 않아서, 파일을 다시 열면 한 번 더 시도한다.
     private var provisionalRanges: [(start: TimeInterval, end: TimeInterval)] = []
 
+    /// 같은 **인식 언어**로 이미 만들어 둔 캐시에서 가져온 원문. 도착어나 엔진만 바뀌면
+    /// 인식 결과는 글자 하나까지 같으므로(인식기에 도착어가 전달되지 않는다) 다시 들을
+    /// 이유가 없다. 창이 이 범위 안에 들면 인식을 건너뛰고 여기서 세그먼트를 꺼내 쓴다.
+    private var recognizedSegments: [SubtitleCue] = []
+    private var recognizedCoverage: [(start: TimeInterval, end: TimeInterval)] = []
+
     /// 최고 등급보다 낮은 창으로 만든 구간. 만들 게 다 떨어지면 여기를 300초 창으로
     /// 다시 만든다. 등급이 낮은 것부터 처리한다 — 60초로 급조한 쪽이 제일 아쉬우니까.
     ///
@@ -204,6 +210,8 @@ final class SubtitleGenerator: ObservableObject {
         coveredRanges = []
         provisionalRanges = []
         pendingRefine = []
+        recognizedSegments = []
+        recognizedCoverage = []
         lastPersistedCount = 0
         leadSeconds = 0
         lastTickTime = nil
@@ -223,6 +231,8 @@ final class SubtitleGenerator: ObservableObject {
         }
         // 지금 언어 조합으로 만든 게 없을 때만, 다른 언어로 만든 게 있는지 본다.
         otherLanguageCache = cues.isEmpty ? findOtherLanguageCache() : nil
+        // 인식 언어가 같은 캐시가 있으면 그 원문을 재사용 소스로 들고 간다.
+        loadRecognitionSource()
         DostLog.log("attach url=\(sourceURL?.lastPathComponent ?? "nil") asset=\(asset != nil) cached=\(cues.count) other=\(otherLanguageCache.map { "\($0.source)_\($0.target)" } ?? "none")")
     }
 
@@ -234,6 +244,8 @@ final class SubtitleGenerator: ObservableObject {
         coveredRanges = []
         provisionalRanges = []
         pendingRefine = []
+        recognizedSegments = []
+        recognizedCoverage = []
         asset = nil
         sourceURL = nil
         mediaDuration = 0
@@ -277,6 +289,8 @@ final class SubtitleGenerator: ObservableObject {
         coveredRanges = []
         provisionalRanges = []
         pendingRefine = []
+        recognizedSegments = []
+        recognizedCoverage = []
         lastPersistedCount = 0
         if let url = cacheURL() { try? FileManager.default.removeItem(at: url) }
         status = .idle
@@ -430,6 +444,12 @@ final class SubtitleGenerator: ObservableObject {
         // 필요 없다 (어차피 대상 구간 밖이라 채택하지 않는다).
         let isLastWindow = refining != nil || (mediaDuration > 0 && windowEnd >= mediaDuration - 0.01)
 
+        // 인식 언어가 같은 캐시가 이 구간을 이미 알고 있으면 다시 듣지 않는다.
+        // 정교화는 "더 긴 창으로 다시 인식"하는 게 목적이라 재사용하면 안 된다.
+        let reusable: [TranscriptSegment]? = (refining == nil
+                                              && recognitionCovers(windowStart, windowEnd))
+            ? reusedSegments(from: windowStart, to: windowEnd) : nil
+
         status = .working
         jobGeneration &+= 1
         let generation = jobGeneration
@@ -440,9 +460,18 @@ final class SubtitleGenerator: ObservableObject {
                     start: CMTime(seconds: windowStart, preferredTimescale: 600),
                     duration: CMTime(seconds: windowEnd - windowStart, preferredTimescale: 600)
                 )
-                let raw = try await self.transcriber.transcribe(asset: asset,
+                let raw: [TranscriptSegment]
+                if let reusable {
+                    raw = reusable
+                    DostLog.log(String(format: "recognition reused: %d segments for %.1f-%.1fs",
+                                       raw.count, windowStart, windowEnd))
+                } else {
+                    raw = try await self.transcriber.transcribe(asset: asset,
                                                                 timeRange: range,
                                                                 locale: locale)
+                    DostLog.log(String(format: "transcribed %d segments for %.1f-%.1fs",
+                                       raw.count, windowStart, windowEnd))
+                }
                 // 여기서부터는 취소를 확인하지 않는다.
                 //
                 // 인식이 끝난 순간 그 결과는 재생 위치와 무관하게 유효한 데이터다. 탐색
@@ -452,15 +481,13 @@ final class SubtitleGenerator: ObservableObject {
                 //
                 // 밀려난 작업인지는 아래 MainActor 블록에서 세대 번호로 가린다. 결과는
                 // 저장하되 다음 창을 고르는 흐름만 건드리지 않는다.
-                DostLog.log(String(format: "transcribed %d segments for %.1f-%.1fs", raw.count, windowStart, windowEnd))
-
                 // 겹침 구간에서 이미 만든 큐와 중복되는 세그먼트를 버린다.
                 var segments = raw.filter { $0.end > boundary + 0.05 }
 
                 // 창 끝에 딱 붙어 끝나는 세그먼트는 말이 잘렸을 가능성이 크다.
                 // 마지막 창이 아니면 버리고, 다음 창을 그 세그먼트 시작점부터 다시 읽는다.
                 var nextCovered = windowEnd
-                if !isLastWindow, let last = segments.last, last.end >= windowEnd - 0.35 {
+                if reusable == nil, !isLastWindow, let last = segments.last, last.end >= windowEnd - 0.35 {
                     segments.removeLast()
                     nextCovered = max(boundary + 1.0, last.start)
                 }
@@ -751,6 +778,64 @@ final class SubtitleGenerator: ObservableObject {
     /// 이 영상에 대해 **다른 언어 조합으로 만들어 둔 캐시**가 있으면 그 조합.
     /// 지금 설정으로는 자막이 없는데 예전에 다른 언어로 만든 게 있을 때만 값이 있다.
     @Published private(set) var otherLanguageCache: (source: String, target: String)? = nil
+
+    /// 인식 언어가 같은 다른 캐시(도착어·엔진만 다른 것)에서 원문을 가져온다.
+    ///
+    /// 인식기에는 도착어가 전달되지 않으므로(`transcribe(asset:timeRange:locale:)` 의
+    /// locale 은 출발어뿐) 같은 오디오·같은 출발어면 원문이 동일하다. 도착어를 바꿨다고
+    /// 다시 듣는 건 순수한 낭비다 — 특히 인식은 권한이 걸리고 CPU·발열을 만드는 경로다.
+    ///
+    /// 커버리지가 가장 넓은 것을 고른다. 여러 도착어로 만들어 뒀다면 제일 많이 아는 쪽.
+    private func loadRecognitionSource() {
+        recognizedSegments = []
+        recognizedCoverage = []
+        guard let current = cacheURL() else { return }
+        let dir = current.deletingLastPathComponent()
+        let hash = String(current.lastPathComponent.prefix(while: { $0 != "." }))
+        let src = resolvedSourceLocale().identifier(.bcp47)
+        guard let files = try? FileManager.default.contentsOfDirectory(at: dir,
+                                                                       includingPropertiesForKeys: nil) else { return }
+        var best: (cues: [SubtitleCue], covered: [(start: TimeInterval, end: TimeInterval)], span: TimeInterval)?
+        for f in files where f.pathExtension == "json" && f.lastPathComponent != current.lastPathComponent {
+            let parts = f.lastPathComponent.split(separator: ".")
+            guard parts.count == 4, parts[0] == hash else { continue }
+            let langs = parts[1].split(separator: "_")
+            guard langs.count == 2, String(langs[0]) == src else { continue }
+            guard let data = try? Data(contentsOf: f),
+                  let decoded = try? JSONDecoder().decode(CachedSubtitles.self, from: data),
+                  decoded.version == Self.cacheFormatVersion,
+                  !decoded.cues.isEmpty else { continue }
+            let covered = decoded.covered
+                .filter { $0.count == 2 && $0[1] > $0[0] }
+                .map { (start: $0[0], end: $0[1]) }
+            let span = covered.reduce(0) { $0 + ($1.end - $1.start) }
+            if best == nil || span > best!.span { best = (decoded.cues, covered, span) }
+        }
+        guard let best else { return }
+        recognizedSegments = best.cues.sorted { $0.start < $1.start }
+        recognizedCoverage = best.covered
+        DostLog.log(String(format: "recognition source: %d segments, %.0fs covered (src=%@)",
+                           recognizedSegments.count, best.span, src))
+    }
+
+    /// 이 구간이 재사용 소스 안에 온전히 들어 있는지.
+    private func recognitionCovers(_ start: TimeInterval, _ end: TimeInterval) -> Bool {
+        guard !recognizedCoverage.isEmpty else { return false }
+        var probe = start
+        for r in recognizedCoverage.sorted(by: { $0.start < $1.start }) where r.end > probe {
+            if r.start > probe + 0.5 { return false }
+            probe = Swift.max(probe, r.end)
+            if probe >= end - 0.5 { return true }
+        }
+        return probe >= end - 0.5
+    }
+
+    /// 재사용 소스에서 구간에 해당하는 세그먼트를 꺼낸다.
+    private func reusedSegments(from start: TimeInterval, to end: TimeInterval) -> [TranscriptSegment] {
+        recognizedSegments
+            .filter { $0.start >= start && $0.start < end }
+            .map { TranscriptSegment(start: $0.start, end: $0.end, text: $0.sourceText) }
+    }
 
     /// 같은 영상(해시)의 다른 언어 캐시를 찾는다. 파일명은
     /// `<해시>.<인식>_<대상>.<엔진>.json` 이라 가운데 칸만 다르다.
