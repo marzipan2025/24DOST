@@ -1359,39 +1359,50 @@ class VideoSampler: ObservableObject {
         let videoAspect  = CGFloat(bufWidth) / CGFloat(bufHeight)
         let zoom = effectiveZoom(dispW: dispW, dispH: dispH, videoAspect: videoAspect)
 
-        // 격자가 덮을 영역. 창 모드는 창 전체, 전체화면은 비율을 지킨 영역.
+        // 격자 크기와 읽어올 원본 영역.
         //
-        // 전체화면을 창 모드처럼 처리하면 안 된다 — 피크가 거기서는 .resizeAspect
-        // (레터박스)로 바뀌어 도트와 어긋나고, ⌘0(fit)/⌘1(fill)/핀치 줌이 전부
-        // "fit = 1.0" 을 기준으로 정의돼 있어서 fit 과 fill 이 구분되지 않게 된다.
-        let coverW: CGFloat
-        let coverH: CGFloat
+        // **전체화면은 예전 계산을 그대로 쓴다.** 거기서는 피크가 .resizeAspect
+        // (레터박스)로 바뀌어 창 모드처럼 채우면 어긋나고, ⌘0(fit)/⌘1(fill)/핀치 줌이
+        // 전부 "fit = 1.0" 을 기준으로 정의돼 있다. 특히 줌을 srcW /= zoom 으로 단순화하면
+        // 확대해도 화면 안에 들어오는 경우(예: 4:3 영상 + 완만한 줌)에 원본을 잘라 버린다 —
+        // 원래 식은 그 경우 원본을 다 읽는다.
+        let cols: Int
+        let rows: Int
+        let srcW: CGFloat
+        let srcH: CGFloat
+
         if isFullscreen {
+            let fittedW: CGFloat
+            let fittedH: CGFloat
             if dispW / dispH > videoAspect {
-                coverH = dispH; coverW = coverH * videoAspect
+                fittedH = dispH; fittedW = fittedH * videoAspect
             } else {
-                coverW = dispW; coverH = coverW / videoAspect
+                fittedW = dispW; fittedH = fittedW / videoAspect
             }
+            let scaledW = fittedW * zoom
+            let scaledH = fittedH * zoom
+            let visibleW = min(dispW, scaledW)
+            let visibleH = min(dispH, scaledH)
+            cols = max(1, Int(visibleW / gridSize))
+            rows = max(1, Int(visibleH / gridSize))
+            srcW = CGFloat(bufWidth)  * (visibleW / scaledW)
+            srcH = CGFloat(bufHeight) * (visibleH / scaledH)
         } else {
-            coverW = dispW; coverH = dispH
+            // 창 모드: 격자가 창 전체를 덮고, 원본에서 창 비율에 맞는 중앙 영역만 읽는다.
+            // 피크의 .resizeAspectFill 과 같은 방식이라 두 모드가 같은 화면이 된다.
+            // 창 모드에서는 줌이 항상 .fit(=1)이다(전체화면을 나올 때 zoomToFit 으로 되돌린다).
+            cols = max(1, Int(dispW / gridSize))
+            rows = max(1, Int(dispH / gridSize))
+            let windowAspect = dispW / dispH
+            if windowAspect > videoAspect {
+                srcW = CGFloat(bufWidth)              // 창이 더 넓다 → 위아래를 자름
+                srcH = srcW / windowAspect
+            } else {
+                srcH = CGFloat(bufHeight)             // 더 길다 → 좌우를 자름
+                srcW = srcH * windowAspect
+            }
         }
-        let coverAspect = coverW / coverH
 
-        let cols = max(1, Int(min(dispW, coverW * max(1, zoom)) / gridSize))
-        let rows = max(1, Int(min(dispH, coverH * max(1, zoom)) / gridSize))
-
-        // 덮을 영역의 비율에 맞춘 중앙 크롭. 줌은 그 영역을 한 번 더 좁힌다.
-        var srcW: CGFloat
-        var srcH: CGFloat
-        if coverAspect > videoAspect {
-            srcW = CGFloat(bufWidth)                 // 덮을 영역이 더 넓다 → 위아래를 자름
-            srcH = srcW / coverAspect
-        } else {
-            srcH = CGFloat(bufHeight)                // 더 길다 → 좌우를 자름
-            srcW = srcH * coverAspect
-        }
-        srcW /= max(1, zoom)
-        srcH /= max(1, zoom)
         let srcX0 = (CGFloat(bufWidth)  - srcW) / 2
         let srcY0 = (CGFloat(bufHeight) - srcH) / 2
 
