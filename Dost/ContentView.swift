@@ -3043,13 +3043,23 @@ struct ContentView: View {
         guard vs.width > 0, vs.height > 0 else { return }
         guard let window = NSApplication.shared.windows.first else { return }
 
-        let stepW = vs.width  * 0.5 * 0.25    // 기준값 × 0.25
-        let stepH = vs.height * 0.5 * 0.25
-        let delta = CGFloat(direction)
-
+        // 창을 임의 비율로 늘려 놨어도, 크기를 조절하는 순간 **영상 비율로 되돌린다.**
+        //
+        // 예전에는 현재 창 크기에 영상 비율만큼의 증분을 더했다. 그래서 한 번 비뚤어진
+        // 비율이 그대로 유지된 채 커지고 작아졌다. 이제 배율 하나로만 크기를 정한다 —
+        // 창 크기 = 영상 크기 × 배율. 비율은 언제나 영상과 같아진다.
+        //
+        // 현재 배율은 창 안에 들어가는 가장 큰 영상 비율 상자에서 뽑는다(min). 그래야
+        // 비뚤어진 창에서 스냅할 때 화면 밖으로 갑자기 커지지 않는다.
+        let step: CGFloat = 0.5 * 0.25        // 기준(절반 크기)의 1/4
         let current = window.frame.size
-        let newW = current.width  + delta * stepW
-        let newH = current.height + delta * stepH
+        let fitted = min(current.width / vs.width, current.height / vs.height)
+        // 가장 가까운 칸으로 스냅한 뒤 한 칸 이동.
+        let snapped = (fitted / step).rounded() * step
+        let scale = max(step, snapped + CGFloat(direction) * step)
+
+        let newW = vs.width  * scale
+        let newH = vs.height * scale
 
         if direction < 0 {
             // 축소: 너비/높이 둘 중 하나라도 120 미만이면 거부.
