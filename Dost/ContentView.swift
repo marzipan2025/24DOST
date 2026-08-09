@@ -1459,6 +1459,16 @@ struct ContentView: View {
         }
     }
 
+    /// 다른 언어 캐시를 두고 물어볼 상황인지.
+    ///
+    /// **이 영상에 대해 이미 언어를 고른 적이 있으면 묻지 않는다.** 안 그러면
+    /// 설정에서 방금 일본어로 바꾼 직후에 "USE ENGLISH?" 가 떠서, 방금 내린 결정을
+    /// 되묻는 꼴이 된다. 프롬프트는 "아직 아무 선택도 안 한 영상"에서만 의미가 있다.
+    private var shouldAskAboutOtherLanguage: Bool {
+        guard let key = currentPlaybackPositionKey else { return true }
+        return rememberedSourceLanguages[key] == nil
+    }
+
     /// 직전에 언어를 맞춰 준 영상. 같은 영상 안에서 사용자가 언어를 바꾼 것과
     /// 영상이 바뀐 것을 구분하는 데 쓴다.
     @State private var lastSyncedMediaKey: String? = nil
@@ -2130,7 +2140,11 @@ struct ContentView: View {
             onOpenRecent:           handleOpenRecentNotification
         ))
         .onReceive(sampler.generator.$otherLanguageCache) { pair in
-            languagePrompt = pair
+            languagePrompt = shouldAskAboutOtherLanguage ? pair : nil
+            if pair != nil && !shouldAskAboutOtherLanguage {
+                // 물어볼 필요가 없으면 생성 잠금을 바로 푼다.
+                sampler.generator.dismissOtherLanguagePrompt()
+            }
         }
         .modifier(SourceLanguageSync(signature: sourceLanguageSyncSignature,
                                      onChange: syncSourceLanguageWithMedia))

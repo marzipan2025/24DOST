@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────
-# make_dmg.sh  —  24DOST 0.0.5.7 DMG 패키져 (ffmpeg 임베드 포함)
+# make_dmg.sh  —  24DOST 0.0.5.8 DMG 패키져 (ffmpeg 임베드 포함)
 # ─────────────────────────────────────────────────────────
 set -e
 
 APP_NAME="24DOST"
-VOL_NAME="24DOST 0.0.5.7"
-VERSION="0.0.5.7"
+VOL_NAME="24DOST 0.0.5.8"
+VERSION="0.0.5.8"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
