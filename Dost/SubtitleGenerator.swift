@@ -504,6 +504,7 @@ final class SubtitleGenerator: ObservableObject {
                             for cue in translated where !self.isDuplicate(cue) {
                                 self.cues.insertSorted(cue)
                             }
+                            self.normalizeCues()
                             if !translated.isEmpty { self.markCovered(from: boundary, to: nextCovered) }
                         }
                         DostLog.log("stale job gen=\(generation): 결과는 저장, 흐름은 현재 작업(gen=\(self.jobGeneration))에 맡김")
@@ -524,6 +525,7 @@ final class SubtitleGenerator: ObservableObject {
                         marked.tier = tier
                         self.cues.insertSorted(marked)
                     }
+                    self.normalizeCues()
                     DostLog.log("+\(translated.count) cues (first: \(translated.first?.text.prefix(24) ?? ""))")
                     self.markCovered(from: boundary, to: nextCovered)
                     // 말이 하나도 안 나온 창은 "확인했고 자막 없음"으로 굳히지 않는다.
@@ -594,6 +596,49 @@ final class SubtitleGenerator: ObservableObject {
             // 번역 실패는 치명적이지 않다 — 원문 자막이라도 보여준다.
             return segments.map { SubtitleCue(start: $0.start, end: $0.end, text: $0.text) }
         }
+    }
+
+    /// 큐 배열의 불변식을 강제한다: **겹치지 않고, 같은 대사가 두 벌 남지 않는다.**
+    ///
+    /// 삽입 지점마다 따로 막으려다 계속 구멍이 났다. 특히 정교화(adoptRefined)는 지우는
+    /// 기준이 **시작 시각**이라, 대상 구간 앞에서 시작해 안쪽까지 걸쳐 있는 큐가 살아남아
+    /// 새로 넣은 큐와 겹쳤다 — 실측에서 tier1 [59.8-62.9] "また 1本目に戻ってますよ。" 옆에
+    /// tier2 [60.4-62.8] "た 1本目に戻ってますよ。" 가 나란히 남았다. 어느 경로로 들어왔든
+    /// 마지막에 한 번 훑는 편이 확실하다.
+    private func normalizeCues() {
+        guard cues.count > 1 else { return }
+        /// 짧은 맞장구("はい")가 아무 긴 대사에나 포함돼 멀쩡한 자막을 지우지 않도록 하한.
+        let minLengthForContainment = 10
+        let nearby: TimeInterval = 2.0
+
+        // 1) 같은 대사 두 벌 — 등급이 높은(더 정교한) 쪽을 남긴다.
+        var keep = [SubtitleCue]()
+        keep.reserveCapacity(cues.count)
+        for cue in cues {
+            let text = cue.sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+            var replaced = false
+            if let i = keep.lastIndex(where: { existing in
+                guard abs(existing.start - cue.start) < nearby else { return false }
+                let other = existing.sourceText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if other == text { return true }
+                guard min(other.count, text.count) >= minLengthForContainment else { return false }
+                return other.contains(text) || text.contains(other)
+            }) {
+                if cue.tier > keep[i].tier { keep[i] = cue }
+                replaced = true
+            }
+            if !replaced { keep.append(cue) }
+        }
+
+        // 2) 남은 겹침은 앞 큐의 끝을 잘라 없앤다. 두 줄이 동시에 뜨지 않게.
+        for i in keep.indices.dropLast() where keep[i].end > keep[i + 1].start {
+            keep[i] = SubtitleCue(start: keep[i].start,
+                                  end: max(keep[i].start + 0.3, keep[i + 1].start),
+                                  text: keep[i].text,
+                                  sourceText: keep[i].sourceText,
+                                  tier: keep[i].tier)
+        }
+        cues = keep
     }
 
     /// 같은 대사가 시작 시각만 몇십 밀리초 다른 채로 여러 번 들어오는 경우가 있다.
@@ -753,6 +798,7 @@ final class SubtitleGenerator: ObservableObject {
             marked.tier = newTier
             cues.insertSorted(marked)
         }
+        normalizeCues()
         // 한 칸씩만 올린다 — 단계별 결과를 눈으로 비교할 수 있어야 하기 때문이다.
         // 아직 최고 등급이 아니면 다음 차례를 위해 대기열에 되돌린다.
         if newTier < SubtitleTier.max {
