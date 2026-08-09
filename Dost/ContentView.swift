@@ -318,6 +318,37 @@ struct SubtitleTypeface {
 /// 재보고 싶으면 CTLineGetBoundsWithOptions(.useGlyphPathBounds).
 private let hangulSubtitleScale: CGFloat = 0.75
 
+/// 문자열이 **실제로** 차지하는 세로 범위(베이스라인 기준 위/아래).
+///
+/// 예전에는 이걸 cap-height(위) ~ 베이스라인(아래)로 가정했다. 영문 도트 폰트에서는
+/// 정확히 맞는다 — BPdots 26pt 는 잉크가 베이스라인 위 12.35, 아래 0 이고 capHeight 가
+/// 그대로 12.35 다. 그런데 한글은 cap 개념이 없어서 capHeight 가 실제 잉크보다 한참
+/// 작고(코레일 19.5pt: 가정 9.75 vs 실제 15.07), 받침이 베이스라인 **아래로** 3.71 내려간다.
+/// 그래서 자막 배경 캡슐이 글자를 못 감싸고 위쪽에 딱 붙어 보였다.
+///
+/// 글리프 패스 바운즈는 비싸므로 (폰트, 크기, 문자열)로 캐시한다. 자막은 초당 몇 번이
+/// 아니라 몇 초에 한 번 바뀌므로 이걸로 충분하다.
+@MainActor
+private enum SubtitleInk {
+    private static var cache: [String: (above: CGFloat, below: CGFloat)] = [:]
+
+    static func extent(of text: String, fontName: String, size: CGFloat) -> (above: CGFloat, below: CGFloat) {
+        let key = "\(fontName)|\(size)|\(text)"
+        if let hit = cache[key] { return hit }
+        guard let font = NSFont(name: fontName, size: size) else { return (size, 0) }
+        let attributed = NSAttributedString(string: text, attributes: [.font: font])
+        let line = CTLineCreateWithAttributedString(attributed)
+        // CoreText 는 베이스라인이 원점이고 위쪽이 양수.
+        let bounds = CTLineGetBoundsWithOptions(line, [.useGlyphPathBounds])
+        var result = (above: max(0, bounds.maxY), below: max(0, -bounds.minY))
+        // 공백뿐이면 잉크가 없다. 캡슐이 납작해지지 않게 예전 기준으로 되돌린다.
+        if result.above <= 0 && result.below <= 0 { result = (above: font.capHeight, below: 0) }
+        if cache.count > 64 { cache.removeAll() }
+        cache[key] = result
+        return result
+    }
+}
+
 private func subtitleTypeface(for text: String, baseSize: CGFloat) -> SubtitleTypeface {
     let lineHeight = baseSize * 1.08
     let dotName = dotsFontName(forSize: baseSize)
@@ -1007,21 +1038,35 @@ private struct DotsOverlayView: View {
             let isRealSubtitle = sampler.hasSubtitles && sampler.showSubtitles
                 && !sampler.currentSubtitle.isEmpty
             if isPeeking, subtitleBackdropWhilePeeking, isRealSubtitle {
-                let fontSize = bodyFace.size
                 let lineH = bodyFace.lineHeight
                 let nsFont = bodyFace.nsFont
                 let n = max(1, subtitleLines.count)
-                // sr 은 라인박스 기준이라 글씨 위 여백이 커서 글씨가 아래로 쏠림.
-                // 실제 잉크 범위(첫 줄 cap-top ~ 마지막 줄 baseline)에 맞춰 캡슐을 수직 중앙 정렬.
-                let inkTop    = sr.minY + bodyFace.baselineOffset + (nsFont.ascender - nsFont.capHeight)
-                let inkBottom = sr.minY + bodyFace.baselineOffset + CGFloat(n - 1) * lineH + nsFont.ascender
+                // 여백은 **기준 크기**로 잡는다. 한글은 0.75 로 줄여 그리는데 그 줄어든
+                // 크기로 여백까지 줄이면, 같은 자막 크기인데 한글 캡슐만 빡빡해진다.
+                // 좌우가 0.5 였을 때 글자가 캡슐 옆면에 밭게 붙어 보였다. 캡슐이 알약이라
+                // corner radius 가 높이의 절반인데, 한글은 캡슐이 높아져 radius(17.2)가
+                // 좌우 여백(13)보다 커진다 — 글자 시작점이 둥근 모서리 안쪽에 들어간다.
+                let padX = sampler.subtitleFontSize * 0.72
+                let padY = sampler.subtitleFontSize * 0.30
+                // 줄마다 실제 잉크 범위를 재서 캡슐이 글자를 확실히 감싸게 한다.
+                // (cap-height 가정으로는 한글을 못 잰다 — SubtitleInk 주석 참고)
+                func baseline(_ i: Int) -> CGFloat {
+                    sr.minY + bodyFace.baselineOffset + CGFloat(i) * lineH + nsFont.ascender
+                }
+                var inkTop = CGFloat.greatestFiniteMagnitude
+                var inkBottom = -CGFloat.greatestFiniteMagnitude
+                var tallestLine: CGFloat = 0
+                for (i, line) in subtitleLines.enumerated() {
+                    let ink = SubtitleInk.extent(of: line, fontName: bodyFace.fontName, size: bodyFace.size)
+                    inkTop = min(inkTop, baseline(i) - ink.above)
+                    inkBottom = max(inkBottom, baseline(i) + ink.below)
+                    tallestLine = max(tallestLine, ink.above + ink.below)
+                }
                 let inkCenterY = (inkTop + inkBottom) / 2
-                let padX = fontSize * 0.5
-                let padY = fontSize * 0.30
                 let capH = (inkBottom - inkTop) + padY * 2
                 // 한 줄 기준 캡슐 높이의 절반을 corner radius로 고정 → 줄 수가 늘어도
                 // 라운딩은 한 줄(반원)일 때와 동일하게 유지된다.
-                let oneLineH = nsFont.capHeight + padY * 2
+                let oneLineH = tallestLine + padY * 2
                 let cornerR = oneLineH / 2
                 // 우측 마진만 1px 줄임(좌측 padX 유지, 폭에서 1 차감).
                 let capRect = CGRect(x: sr.minX - padX, y: inkCenterY - capH / 2,

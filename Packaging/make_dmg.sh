@@ -6,7 +6,7 @@ set -e
 
 APP_NAME="24DOST"
 VOL_NAME="24DOST 0.0.5.12"
-VERSION="0.0.6.1"
+VERSION="0.0.6.2"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
