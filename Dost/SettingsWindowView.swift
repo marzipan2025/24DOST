@@ -1192,10 +1192,9 @@ struct SubtitleSettingsView: View {
         ("ar", "Arabic"), ("hi", "Hindi"), ("th", "Thai"), ("vi", "Vietnamese")
     ]
 
-    /// 80초는 뺐다. 넓게 잡을수록 짧은 창 구간이 늘어 품질이 나빠지는데, 이름만 보고
-    /// "많이 준비된다"고 오해해 끝값을 고르기 쉽다. 40초면 실용 범위를 충분히 덮는다.
     private static let fastResponseChoices: [(value: String, label: String)] = [
-        ("5", "5s"), ("10", "10s"), ("20", "20s"), ("40", "40s")
+        ("3", "3s"), ("10", "10s"), ("20", "20s"),
+        ("40", "40s"), ("80", "80s"), ("100", "100s")
     ]
 
     private static let claudeModels: [(value: String, label: String)] = [
