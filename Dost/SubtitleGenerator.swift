@@ -28,7 +28,7 @@ enum DostLog {
 
 enum SubtitleDefaults {
     static let autoGenerate     = "24dost.subtitle.autoGenerate"
-    static let sourceLanguage   = "24dost.subtitle.sourceLanguage"   // "auto" 또는 BCP-47
+    static let sourceLanguage   = "24dost.subtitle.sourceLanguage"   // BCP-47
     static let targetLanguage   = "24dost.subtitle.targetLanguage"   // BCP-47
     static let backend          = "24dost.subtitle.backend"          // TranslationBackend.rawValue
     static let claudeModel      = "24dost.subtitle.claudeModel"
@@ -36,6 +36,8 @@ enum SubtitleDefaults {
     static let fastResponseSeconds = "24dost.subtitle.lookAhead"
 
     static let defaultTarget = "ko"
+    /// 인식 언어 기본값. 예전 "auto" 는 감지가 아니라 시스템 언어를 쓰는 것이어서 없앴다.
+    static let defaultSourceLanguage = "en-US"
     static let defaultClaudeModel = "claude-haiku-4-5"
     static let defaultFastResponse: Double = 20
 }
@@ -601,8 +603,17 @@ final class SubtitleGenerator: ObservableObject {
         }
         let digest = SHA256.hash(data: Data(keySource.utf8))
         let hash = digest.map { String(format: "%02x", $0) }.joined().prefix(20)
-        let lang = targetLanguage.languageCode?.identifier ?? "xx"
-        return dir.appendingPathComponent("\(hash).\(lang).\(backend.rawValue).json")
+        // **인식 언어도 키에 넣는다.** 대상 언어와 엔진은 원래 들어 있었는데 인식 언어만
+        // 빠져 있었다. 그래서 언어를 잘못 잡고 만든 쓰레기 자막이, 설정을 고쳐도 같은
+        // 파일에서 그대로 다시 읽혀 남아 있었다(커버리지가 "다 만듦"이라 재생성도 안 된다).
+        // 지우지 않고 키를 가르는 이유는 되돌릴 수 있게 하기 위해서다 — 언어를 되돌리면
+        // 예전에 제대로 만든 자막이 그대로 돌아온다.
+        //
+        // 설정 문자열이 아니라 **해석된 실제 로케일**을 쓴다. 지역까지 포함해야 한다
+        // (en-GB 와 en-US 는 인식 결과가 다르다).
+        let src = resolvedSourceLocale().identifier(.bcp47)
+        let dst = targetLanguage.languageCode?.identifier ?? "xx"
+        return dir.appendingPathComponent("\(hash).\(src)_\(dst).\(backend.rawValue).json")
     }
 
     private func loadCache() -> (cues: [SubtitleCue],

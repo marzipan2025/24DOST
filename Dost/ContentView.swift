@@ -1443,7 +1443,7 @@ struct ContentView: View {
     @AppStorage("adaptiveSubtitleColor") private var adaptiveSubtitleColor = true
     // 자동 생성 자막 설정 — 값이 바뀌면 generator 에 그대로 밀어 넣는다.
     @AppStorage(SubtitleDefaults.autoGenerate)     private var autoGenerateSubtitles = false
-    @AppStorage(SubtitleDefaults.sourceLanguage)   private var subtitleSourceLanguage = "auto"
+    @AppStorage(SubtitleDefaults.sourceLanguage)   private var subtitleSourceLanguage = SubtitleDefaults.defaultSourceLanguage
     @AppStorage(SubtitleDefaults.targetLanguage)   private var subtitleTargetLanguage = SubtitleDefaults.defaultTarget
     @AppStorage(SubtitleDefaults.backend)          private var subtitleBackendRaw = TranslationBackend.apple.rawValue
     @AppStorage(SubtitleDefaults.claudeModel)      private var claudeModel = SubtitleDefaults.defaultClaudeModel
@@ -1501,7 +1501,7 @@ struct ContentView: View {
     private func applySubtitleSettings() {
         sampler.autoGenerateSubtitles = autoGenerateSubtitles
         let g = sampler.generator
-        g.sourceLocale = subtitleSourceLanguage == "auto" ? nil : Locale(identifier: subtitleSourceLanguage)
+        g.sourceLocale = subtitleSourceLanguage.isEmpty ? nil : Locale(identifier: subtitleSourceLanguage)
         g.targetLanguage = Locale.Language(identifier: subtitleTargetLanguage)
         g.backend = TranslationBackend(rawValue: subtitleBackendRaw) ?? .apple
         g.claudeModel = claudeModel

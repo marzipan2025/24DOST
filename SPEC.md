@@ -218,7 +218,7 @@ Apple 번역기는 `withCheckedContinuation`이라 취소를 관찰하지 않으
 
 ### 5.8 캐시
 
-경로: `~/Library/Application Support/24dost/subtitles/<해시>.<언어>.<엔진>.json`
+경로: `~/Library/Application Support/24dost/subtitles/<해시>.<인식언어>_<대상언어>.<엔진>.json`
 해시 = SHA256(`파일 URL` + `|` + `파일 크기`)의 앞 20자.
 
 SRT가 아니라 JSON인 이유는 **"어디까지 만들었는지"를 담아야** 하기 때문이다. 큐의 시각에서 역산하면, 말이 없어서 큐가 안 생긴 구간을 "아직 안 만든 곳"으로 오해한다.
@@ -233,6 +233,7 @@ SRT가 아니라 JSON인 이유는 **"어디까지 만들었는지"를 담아야
 ```
 
 - 형식 버전이 다르면 무시하고 다시 만든다. 품질에 영향을 주는 변경이 있을 때 버전을 올린다.
+- **인식 언어·대상 언어·엔진별로 파일이 갈린다.** 인식 언어는 해석된 실제 로케일(지역 포함 — en-GB 와 en-US 는 결과가 다르다)을 쓴다. 0.0.5.4 이전에는 인식 언어가 키에 없어서, 언어를 잘못 잡고 만든 자막이 설정을 고쳐도 같은 파일에서 다시 읽혀 남아 있었다.
 - **엔진·언어별로 파일이 갈린다.** 따라서 번역 엔진이나 대상 언어를 바꾸면 인식부터 전부 다시 한다. (인식 결과는 언어·엔진과 무관하므로 캐시를 둘로 쪼개면 재사용할 수 있다 — 미구현.)
 - 엔진·언어·모델이 바뀌면 생성기를 **새 조합으로 다시 붙인다.** 안 하면 커버리지가 "다 만듦"이라 재생성도 안 되고 옛 설정으로 만든 자막이 계속 보인다.
 
@@ -323,6 +324,8 @@ SRT가 아니라 JSON인 이유는 **"어디까지 만들었는지"를 담아야
 - **Reset Everything** — 설정·기록·캐시·앱 상태 전부 삭제 (2단계 확인)
 
 ### Subtitles
+> **Spoken Language 에 Auto 는 없다.** 예전에 있던 Auto 는 감지가 아니라 시스템 선호 언어의 첫 번째를 쓰는 것이었다 — 한국어 맥에서 일본어 영상을 틀면 한국어로 인식을 시도해 쓰레기 자막이 나왔다. 이름이 하는 일과 달라 오해를 부르므로 없앴다. 목록도 지역 변종을 추려 13개로 줄였다(중국어는 Cantonese/Mandarin, 영어는 UK/US, 포르투갈어는 브라질/포르투갈, 스페인어는 스페인/멕시코, 나머지는 본토 하나씩).
+
 - **Display** — Adaptive Subtitle Color, Subtitle Backdrop While Peeking
 - **Automatic Subtitles** — Generate When No Subtitles Exist, Spoken Language, Translate Into, Fast Response Range(5/10/20/40초)
 - **Translation Engine** — Engine(Apple/Claude), Model, API Key
