@@ -1434,7 +1434,7 @@ struct ContentView: View {
     @AppStorage(SubtitleDefaults.targetLanguage)   private var subtitleTargetLanguage = SubtitleDefaults.defaultTarget
     @AppStorage(SubtitleDefaults.backend)          private var subtitleBackendRaw = TranslationBackend.apple.rawValue
     @AppStorage(SubtitleDefaults.claudeModel)      private var claudeModel = SubtitleDefaults.defaultClaudeModel
-    @AppStorage(SubtitleDefaults.lookAheadSeconds) private var lookAheadSeconds = SubtitleDefaults.defaultLookAhead
+    @AppStorage(SubtitleDefaults.fastResponseSeconds) private var fastResponseSeconds = SubtitleDefaults.defaultFastResponse
     @AppStorage("subtitleBackdropWhilePeeking") private var subtitleBackdropWhilePeeking = false
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @AppStorage("24dost.backgroundStyle") private var backgroundStyleRaw: Int = BackgroundStyle.blur.rawValue
@@ -1467,7 +1467,7 @@ struct ContentView: View {
     /// 자막 설정 중 하나라도 바뀌면 값이 달라지는 문자열. onChange 트리거용.
     private var subtitleSettingsSignature: String {
         [String(autoGenerateSubtitles), subtitleSourceLanguage, subtitleTargetLanguage,
-         subtitleBackendRaw, claudeModel, String(lookAheadSeconds)].joined(separator: "|")
+         subtitleBackendRaw, claudeModel, String(fastResponseSeconds)].joined(separator: "|")
     }
 
     /// 자막 설정이 바뀌었을 때. 결과물에 영향을 주는 항목(엔진·언어·모델)이 바뀌었다면
@@ -1492,7 +1492,7 @@ struct ContentView: View {
         g.targetLanguage = Locale.Language(identifier: subtitleTargetLanguage)
         g.backend = TranslationBackend(rawValue: subtitleBackendRaw) ?? .apple
         g.claudeModel = claudeModel
-        g.lookAhead = lookAheadSeconds
+        g.fastResponseRange = fastResponseSeconds
     }
 
     /// ⇧⌘E — 생성된 자막을 영상 옆에 .srt 로 저장.

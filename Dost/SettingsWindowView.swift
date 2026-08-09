@@ -1057,7 +1057,7 @@ struct SubtitleSettingsView: View {
     @AppStorage(SubtitleDefaults.targetLanguage)   private var targetLanguage = SubtitleDefaults.defaultTarget
     @AppStorage(SubtitleDefaults.backend)          private var backendRaw = TranslationBackend.apple.rawValue
     @AppStorage(SubtitleDefaults.claudeModel)      private var claudeModel = SubtitleDefaults.defaultClaudeModel
-    @AppStorage(SubtitleDefaults.lookAheadSeconds) private var lookAhead = SubtitleDefaults.defaultLookAhead
+    @AppStorage(SubtitleDefaults.fastResponseSeconds) private var fastResponse = SubtitleDefaults.defaultFastResponse
     @AppStorage(AppAccentColor.storageKey)         private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @AppStorage("adaptiveSubtitleColor")           private var adaptiveSubtitleColor = true
     @AppStorage("subtitleBackdropWhilePeeking")    private var subtitleBackdropWhilePeeking = false
@@ -1093,21 +1093,21 @@ struct SubtitleSettingsView: View {
                 SettingsRow("Translate Into") {
                     SettingsMenuPicker(options: Self.targetLanguages, selection: $targetLanguage)
                 }
-                SettingsRow("Look Ahead",
-                            caption: "How far ahead of the playhead to keep subtitles ready.",
+                SettingsRow("Fast Response Range",
+                            caption: "Within this distance ahead of the playhead, subtitles are made quickly with shorter recognition windows. Beyond it, longer windows are used for better accuracy.",
                             showDivider: false) {
                     SettingsMenuPicker(
-                        options: Self.lookAheadChoices,
+                        options: Self.fastResponseChoices,
                         // 예전 스테퍼(5단위)로 저장된 값은 목록에 없을 수 있다.
                         // 가장 가까운 항목으로 스냅해서 빈 라벨이 뜨지 않게 한다.
                         selection: Binding(
                             get: {
-                                let stored = Int(lookAhead)
-                                let choices = Self.lookAheadChoices.compactMap { Int($0.value) }
+                                let stored = Int(fastResponse)
+                                let choices = Self.fastResponseChoices.compactMap { Int($0.value) }
                                 let nearest = choices.min { abs($0 - stored) < abs($1 - stored) }
-                                return String(nearest ?? Int(SubtitleDefaults.defaultLookAhead))
+                                return String(nearest ?? Int(SubtitleDefaults.defaultFastResponse))
                             },
-                            set: { lookAhead = Double($0) ?? SubtitleDefaults.defaultLookAhead }
+                            set: { fastResponse = Double($0) ?? SubtitleDefaults.defaultFastResponse }
                         )
                     )
                 }
@@ -1195,8 +1195,10 @@ struct SubtitleSettingsView: View {
         ("ar", "Arabic"), ("hi", "Hindi"), ("th", "Thai"), ("vi", "Vietnamese")
     ]
 
-    private static let lookAheadChoices: [(value: String, label: String)] = [
-        ("5", "5s"), ("10", "10s"), ("20", "20s"), ("40", "40s"), ("80", "80s")
+    /// 80초는 뺐다. 넓게 잡을수록 짧은 창 구간이 늘어 품질이 나빠지는데, 이름만 보고
+    /// "많이 준비된다"고 오해해 끝값을 고르기 쉽다. 40초면 실용 범위를 충분히 덮는다.
+    private static let fastResponseChoices: [(value: String, label: String)] = [
+        ("5", "5s"), ("10", "10s"), ("20", "20s"), ("40", "40s")
     ]
 
     private static let claudeModels: [(value: String, label: String)] = [

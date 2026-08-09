@@ -32,11 +32,12 @@ enum SubtitleDefaults {
     static let targetLanguage   = "24dost.subtitle.targetLanguage"   // BCP-47
     static let backend          = "24dost.subtitle.backend"          // TranslationBackend.rawValue
     static let claudeModel      = "24dost.subtitle.claudeModel"
-    static let lookAheadSeconds = "24dost.subtitle.lookAhead"
+    /// 저장 키는 그대로 둔다 — 바꾸면 기존 설정을 잃는다.
+    static let fastResponseSeconds = "24dost.subtitle.lookAhead"
 
     static let defaultTarget = "ko"
     static let defaultClaudeModel = "claude-haiku-4-5"
-    static let defaultLookAhead: Double = 20
+    static let defaultFastResponse: Double = 20
 }
 
 // MARK: - Generator
@@ -77,7 +78,12 @@ final class SubtitleGenerator: ObservableObject {
     var targetLanguage: Locale.Language = Locale.Language(identifier: SubtitleDefaults.defaultTarget)
     var backend: TranslationBackend = .apple
     var claudeModel: String = SubtitleDefaults.defaultClaudeModel
-    var lookAhead: TimeInterval = SubtitleDefaults.defaultLookAhead
+    /// 재생 위치에서 이만큼 앞까지는 **빠른 응답을 우선**한다(짧은 창). 그 밖은 품질 우선.
+    ///
+    /// 예전 이름은 lookAhead 였고 "이만큼 앞서면 생성을 멈춘다"는 뜻이었다. 전체 미리
+    /// 생성을 넣으면서 그 역할은 사라졌는데 이름만 남아, 값을 올리면 "더 많이 준비된다"고
+    /// 오해하기 딱 좋았다. 실제로는 짧은 창 구간만 넓어져 품질이 나빠진다.
+    var fastResponseRange: TimeInterval = SubtitleDefaults.defaultFastResponse
 
     // MARK: 내부 상태
 
@@ -135,7 +141,7 @@ final class SubtitleGenerator: ObservableObject {
     /// 안 급한 작업인데 전부 짧은 창으로 처리하게 된다. 재생 헤드 근처이면서 앞쪽일
     /// 때만 급한 것으로 본다.
     private func isUrgent(frontier: TimeInterval, playhead: TimeInterval) -> Bool {
-        frontier >= playhead - 5 && frontier <= playhead + lookAhead
+        frontier >= playhead - 5 && frontier <= playhead + fastResponseRange
     }
 
     /// 등급이 뜻하는 창 길이.
