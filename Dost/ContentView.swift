@@ -1524,8 +1524,10 @@ struct ContentView: View {
     }
     /// 우상단 도트를 누르고 있는 동안 true. onChanged가 연속 발생하므로 idempotent하게 갱신.
     @State private var isPeeking = false
-    /// 커서가 피크 도트 위에 있는지. 릴리즈로 끝낼지 판단하는 데 쓴다.
-    @State private var isCursorOverPeekDot = false
+    /// 피크 도트 한 칸의 화면 좌표(캔버스 기준, 좌상단 원점).
+    @State private var peekDotRect: CGRect = .zero
+    /// 롤아웃 감시용 마우스 이동 모니터.
+    @State private var peekRolloutMonitor: Any? = nil
     /// 항상 위 (floating window level). 풀스크린 중에는 시각적으로 비활성.
     @State private var isAlwaysOnTop = false
     /// 풀스크린 재생 중 잠자기 방지 토큰. nil = 방지 비활성.
@@ -2119,8 +2121,7 @@ struct ContentView: View {
             sampler.backgroundDotAlpha = (fullscreenBackgroundStyle == .black) ? 0.10 : 0.40
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
-            // 다른 앱으로 넘어가면 hover 가 안 빠질 수 있다. 안전하게 끝낸다.
-            isCursorOverPeekDot = false
+            // 다른 앱으로 넘어가면 마우스 이동 이벤트가 안 온다. 안전하게 끝낸다.
             endPeekIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
@@ -2567,9 +2568,11 @@ struct ContentView: View {
                     .contentShape(Rectangle())
                     .frame(width: grid, height: grid)
                     .position(x: c.x, y: c.y)
-                    .onHover { inside in
-                        isCursorOverPeekDot = inside
-                        if !inside { endPeekIfNeeded() }
+                    .onAppear { peekDotRect = CGRect(x: c.x - grid / 2, y: c.y - grid / 2,
+                                                     width: grid, height: grid) }
+                    .onChange(of: c) { _, p in
+                        peekDotRect = CGRect(x: p.x - grid / 2, y: p.y - grid / 2,
+                                             width: grid, height: grid)
                     }
                     .gesture(
                         DragGesture(minimumDistance: 0)
@@ -2578,11 +2581,10 @@ struct ContentView: View {
                                 if !isPeeking {
                                     isPeeking = true
                                     sampler.peekStart()
+                                    startPeekRolloutWatch()
                                 }
                             }
-                            .onEnded { _ in
-                                if !isCursorOverPeekDot { endPeekIfNeeded() }
-                            }
+                        // onEnded 없음 — 릴리즈로는 끝나지 않는다. 커서가 도트를 벗어나야 끝난다.
                     )
             }
         }
@@ -2597,7 +2599,31 @@ struct ContentView: View {
         }
     }
 
+    /// 커서가 피크 도트를 벗어나는지 감시한다.
+    ///
+    /// SwiftUI 의 onHover 로는 안 된다 — 도트 색이 초당 30번 바뀌면서 이 뷰가 계속 다시
+    /// 만들어지고, 그때마다 hover 추적 영역이 초기화돼 상태가 남지 않는다. 뷰 재생성과
+    /// 무관한 이벤트 모니터로 커서 위치를 직접 본다 (커서 자동 숨김이 쓰는 것과 같은 방식).
+    private func startPeekRolloutWatch() {
+        stopPeekRolloutWatch()
+        NSApplication.shared.windows.first?.acceptsMouseMovedEvents = true
+        peekRolloutMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { event in
+            guard isPeeking, peekDotRect != .zero else { return event }
+            let h = sampler.currentDisplaySize.height
+            // locationInWindow 는 좌하단 원점, 캔버스 좌표는 좌상단 원점.
+            let point = CGPoint(x: event.locationInWindow.x, y: h - event.locationInWindow.y)
+            if !peekDotRect.contains(point) { endPeekIfNeeded() }
+            return event
+        }
+    }
+
+    private func stopPeekRolloutWatch() {
+        if let m = peekRolloutMonitor { NSEvent.removeMonitor(m) }
+        peekRolloutMonitor = nil
+    }
+
     private func endPeekIfNeeded() {
+        stopPeekRolloutWatch()
         guard isPeeking else { return }
         isPeeking = false
         sampler.peekEnd()
