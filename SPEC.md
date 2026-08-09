@@ -321,7 +321,7 @@ SRT가 아니라 JSON인 이유는 **"어디까지 만들었는지"를 담아야
 - Accent Color
 - Software Update
 - **Clear Subtitle Cache** — 생성 자막만 삭제 (2단계 확인)
-- **Reset Everything** — 설정·기록·캐시·앱 상태 전부 삭제 (2단계 확인)
+- **Reset Everything** — 설정·기록·**생성 자막 캐시**·앱 상태 전부 삭제 (2단계 확인). 캐시는 UserDefaults 밖(Application Support)에 있어서 키 삭제 루프로는 안 지워진다 — 0.0.5.6 이전에는 설명 문구와 달리 남아 있었다.
 
 ### Subtitles
 > **Spoken Language 에 Auto 는 없다.** 예전에 있던 Auto 는 감지가 아니라 시스템 선호 언어의 첫 번째를 쓰는 것이었다 — 한국어 맥에서 일본어 영상을 틀면 한국어로 인식을 시도해 쓰레기 자막이 나왔다. 이름이 하는 일과 달라 오해를 부르므로 없앴다. 목록도 지역 변종을 추려 13개로 줄였다(중국어는 Cantonese/Mandarin, 영어는 UK/US, 포르투갈어는 브라질/포르투갈, 스페인어는 스페인/멕시코, 나머지는 본토 하나씩).

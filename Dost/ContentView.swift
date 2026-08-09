@@ -2760,6 +2760,13 @@ struct ContentView: View {
             defaults.removeObject(forKey: key)
         }
         defaults.synchronize()
+
+        // 생성 자막 캐시도 지운다. UserDefaults 밖(Application Support)에 있어서
+        // 위 루프로는 안 지워진다 — 설명 문구는 "cache" 를 지운다고 하는데 실제로는
+        // 남아 있었다.
+        _ = SubtitleGenerator.clearAllCaches()
+        sampler.generator.regenerate()
+
         AppDelegate.clearPendingExternalMediaOpenRequest()
 
         playlist = []
