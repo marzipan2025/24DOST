@@ -3,6 +3,14 @@ import Foundation
 // MARK: - Cue
 
 /// 자막 한 줄. 외부 파일(.srt/.smi)에서 파싱된 것과 엔진이 생성한 것 모두 같은 타입을 쓴다.
+/// 자막을 만든 창 길이의 등급. 높을수록 긴 창 — 경계(콜드 스타트)가 적다.
+enum SubtitleTier {
+    static let urgent  = 0   // 60초  — 재생 위치에 준비된 게 없어 급히 만든 것
+    static let relaxed = 1   // 180초 — 앞서 달리며 여유롭게 만든 것
+    static let fine    = 2   // 600초 — 할 일이 없을 때 다시 만든 것
+    static let max     = fine
+}
+
 struct SubtitleCue: Equatable, Sendable, Codable {
     let start: TimeInterval
     let end: TimeInterval
@@ -10,17 +18,17 @@ struct SubtitleCue: Equatable, Sendable, Codable {
     var text: String
     /// 인식된 원문. 번역 전이거나 번역이 필요 없으면 text 와 동일.
     var sourceText: String
-    /// 짧은 창(급했을 때)으로 만들어졌는지. 긴 창으로 다시 만들면 false 가 된다.
-    /// 진단용 표시에 쓴다 — 옛 캐시에는 없으므로 옵셔널로 읽고 기본은 false.
-    var isCoarse: Bool
+    /// 어느 길이의 창으로 만들어졌는지. 다시 만들면 올라간다.
+    /// 0 = 60초(급했을 때), 1 = 180초, 2 = 600초. 진단용 색 표시에 쓴다.
+    var tier: Int
 
     init(start: TimeInterval, end: TimeInterval, text: String,
-         sourceText: String? = nil, isCoarse: Bool = false) {
+         sourceText: String? = nil, tier: Int = SubtitleTier.relaxed) {
         self.start = start
         self.end = end
         self.text = text
         self.sourceText = sourceText ?? text
-        self.isCoarse = isCoarse
+        self.tier = tier
     }
 
     init(from decoder: any Decoder) throws {
@@ -29,7 +37,26 @@ struct SubtitleCue: Equatable, Sendable, Codable {
         end = try c.decode(TimeInterval.self, forKey: .end)
         text = try c.decode(String.self, forKey: .text)
         sourceText = try c.decodeIfPresent(String.self, forKey: .sourceText) ?? text
-        isCoarse = try c.decodeIfPresent(Bool.self, forKey: .isCoarse) ?? false
+        if let t = try c.decodeIfPresent(Int.self, forKey: .tier) {
+            tier = t
+        } else {
+            // 옛 캐시: isCoarse 불리언만 있었다.
+            let coarse = try c.decodeIfPresent(Bool.self, forKey: .isCoarse) ?? false
+            tier = coarse ? SubtitleTier.urgent : SubtitleTier.relaxed
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case start, end, text, sourceText, tier, isCoarse
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(start, forKey: .start)
+        try c.encode(end, forKey: .end)
+        try c.encode(text, forKey: .text)
+        try c.encode(sourceText, forKey: .sourceText)
+        try c.encode(tier, forKey: .tier)
     }
 }
 

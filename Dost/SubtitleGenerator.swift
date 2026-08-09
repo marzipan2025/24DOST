@@ -96,11 +96,13 @@ final class SubtitleGenerator: ObservableObject {
     /// 캐시에는 쓰지 않아서, 파일을 다시 열면 한 번 더 시도한다.
     private var provisionalRanges: [(start: TimeInterval, end: TimeInterval)] = []
 
-    /// 짧은 창(급했을 때)으로 만든 구간. 만들 게 다 떨어지면 여기를 긴 창으로 다시 만든다.
+    /// 최고 등급보다 낮은 창으로 만든 구간. 만들 게 다 떨어지면 여기를 600초 창으로
+    /// 다시 만든다. 등급이 낮은 것부터 처리한다 — 60초로 급조한 쪽이 제일 아쉬우니까.
+    ///
     /// coveredRanges 에 등급을 섞지 않고 따로 두는 이유는, 그쪽 병합 규칙이 탐색 정확성의
     /// 핵심이라 건드리지 않기 위해서다. 다시 만든 구간은 목록에서 빠지므로 언젠가 비고,
     /// 비면 더 할 일이 없다 — 영원히 도는 일은 없다.
-    private var coarseRanges: [(start: TimeInterval, end: TimeInterval)] = []
+    private var pendingRefine: [(start: TimeInterval, end: TimeInterval, tier: Int)] = []
     private var currentJob: Task<Void, Never>?
     /// 작업 세대 번호. 취소는 협조적이라, 취소를 알아채지 못한 옛 작업이 완료 블록까지
     /// 도달할 수 있다. 그때 currentJob 을 nil 로 덮으면 그 사이 시작된 새 작업의 핸들이
@@ -123,6 +125,8 @@ final class SubtitleGenerator: ObservableObject {
     /// 그 둘을 나눠서, 급할 땐 짧게 응답하고 여유로울 땐 길게 잡아 품질을 올린다.
     private let urgentWindowLength: TimeInterval = 60
     private let relaxedWindowLength: TimeInterval = 180
+    /// 할 일이 없을 때 다시 만들며 쓰는 창. 경계를 가장 적게 만드는 대신 오래 읽는다.
+    private let fineWindowLength: TimeInterval = 600
 
     /// 이 창을 사용자가 기다리고 있는지.
     ///
@@ -132,6 +136,15 @@ final class SubtitleGenerator: ObservableObject {
     /// 때만 급한 것으로 본다.
     private func isUrgent(frontier: TimeInterval, playhead: TimeInterval) -> Bool {
         frontier >= playhead - 5 && frontier <= playhead + lookAhead
+    }
+
+    /// 등급이 뜻하는 창 길이.
+    private func windowLength(forTier tier: Int) -> TimeInterval {
+        switch tier {
+        case SubtitleTier.urgent: return urgentWindowLength
+        case SubtitleTier.fine:   return fineWindowLength
+        default:                  return relaxedWindowLength
+        }
     }
 
     private func windowLength(frontier: TimeInterval, playhead: TimeInterval) -> TimeInterval {
@@ -151,7 +164,7 @@ final class SubtitleGenerator: ObservableObject {
         cues = []
         coveredRanges = []
         provisionalRanges = []
-        coarseRanges = []
+        pendingRefine = []
         lastPersistedCount = 0
         leadSeconds = 0
         lastTickTime = nil
@@ -166,7 +179,7 @@ final class SubtitleGenerator: ObservableObject {
         if let cached = loadCache() {
             cues = cached.cues
             coveredRanges = cached.covered
-            coarseRanges = cached.coarse
+            pendingRefine = cached.pending
             lastPersistedCount = cached.cues.count
         }
         DostLog.log("attach url=\(sourceURL?.lastPathComponent ?? "nil") asset=\(asset != nil) cached=\(cues.count)")
@@ -179,7 +192,7 @@ final class SubtitleGenerator: ObservableObject {
         cues = []
         coveredRanges = []
         provisionalRanges = []
-        coarseRanges = []
+        pendingRefine = []
         asset = nil
         sourceURL = nil
         mediaDuration = 0
@@ -211,7 +224,7 @@ final class SubtitleGenerator: ObservableObject {
         cues = []
         coveredRanges = []
         provisionalRanges = []
-        coarseRanges = []
+        pendingRefine = []
         lastPersistedCount = 0
         if let url = cacheURL() { try? FileManager.default.removeItem(at: url) }
         status = .idle
@@ -310,7 +323,7 @@ final class SubtitleGenerator: ObservableObject {
         var windowEnd: TimeInterval
         let boundary: TimeInterval
         /// 정교화 대상 구간. nil 이면 평소처럼 빈 곳을 채우는 중이다.
-        let refining: (start: TimeInterval, end: TimeInterval)?
+        let refining: (start: TimeInterval, end: TimeInterval, tier: Int)?
         let label: String
 
         if let frontier = fillFrontier, !atEnd {
@@ -324,7 +337,7 @@ final class SubtitleGenerator: ObservableObject {
                 windowEnd = min(windowEnd, nextCovered)
             }
             label = isUrgent(frontier: frontier, playhead: playhead) ? "urgent" : "relaxed"
-        } else if let target = coarseRanges.first {
+        } else if let target = nextRefineTarget() {
             // 채울 곳이 없다 — 짧은 창으로 만들어 둔 구간을 긴 창으로 다시 만든다.
             //
             // 창을 대상 구간 **앞에서부터** 연다. 대상 자리에서 창을 시작하면 거기가
@@ -337,7 +350,7 @@ final class SubtitleGenerator: ObservableObject {
             refining = target
             boundary = target.start
             windowStart = max(0, target.start - refineLeadIn)
-            windowEnd = min(windowStart + relaxedWindowLength,
+            windowEnd = min(windowStart + windowLength(forTier: target.tier + 1),
                             mediaDuration > 0 ? mediaDuration : .greatestFiniteMagnitude)
             label = "refine"
         } else {
@@ -347,14 +360,14 @@ final class SubtitleGenerator: ObservableObject {
         }
 
         guard windowEnd > windowStart + 0.5 else {
-            if let target = refining { dropCoarse(target) }
+            if let target = refining { dropPending(target) }
             status = .caughtUp
             return
         }
 
         DostLog.log(String(format: "pump: window %.1f-%.1fs (%@) frontier=%.1f now=%.1f ranges=%d coarse=%d",
                            windowStart, windowEnd, label, boundary, playhead,
-                           coveredRanges.count, coarseRanges.count))
+                           coveredRanges.count, pendingRefine.count))
         let locale = resolvedSourceLocale()
         let target = targetLanguage
         let translator = makeTranslator()
@@ -416,10 +429,10 @@ final class SubtitleGenerator: ObservableObject {
                         return
                     }
 
-                    let coarse = (label == "urgent")
+                    let tier = (label == "urgent") ? SubtitleTier.urgent : SubtitleTier.relaxed
                     for cue in translated where !self.isDuplicate(cue) {
                         var marked = cue
-                        marked.isCoarse = coarse
+                        marked.tier = tier
                         self.cues.insertSorted(marked)
                     }
                     DostLog.log("+\(translated.count) cues (first: \(translated.first?.text.prefix(24) ?? ""))")
@@ -430,10 +443,10 @@ final class SubtitleGenerator: ObservableObject {
                     // (안 그러면 같은 창을 무한히 다시 읽는다) 캐시에는 남기지 않아서,
                     // 다음에 이 파일을 열면 한 번 더 시도한다.
                     if translated.isEmpty { self.provisionalRanges.append((boundary, nextCovered)) }
-                    // 짧은 창으로 만든 구간은 나중에 긴 창으로 다시 만들 대상으로 남긴다.
-                    if label == "urgent" {
-                        self.coarseRanges.append((boundary, nextCovered))
-                        self.coarseRanges.sort { $0.start < $1.start }
+                    // 최고 등급이 아닌 구간은 나중에 600초 창으로 다시 만들 대상으로 남긴다.
+                    if tier < SubtitleTier.max, !translated.isEmpty {
+                        self.pendingRefine.append((boundary, nextCovered, tier))
+                        self.sortPendingRefine()
                     }
                     self.currentJob = nil
                     self.persistCacheIfNeeded(force: false)
@@ -550,13 +563,13 @@ final class SubtitleGenerator: ObservableObject {
         /// 만들어 둔 구간들. [[start, end], …]
         var covered: [[TimeInterval]]
         var cues: [SubtitleCue]
-        /// 짧은 창으로 만들어 아직 정교화하지 않은 구간. 없으면 빈 배열.
-        var coarse: [[TimeInterval]]?
+        /// 아직 최고 등급으로 다시 만들지 않은 구간. [시작, 끝, 등급] 형태.
+        var pending: [[Double]]?
     }
     /// 2: 창 길이 60초 + 중복 판정 완화. 형식은 그대로지만 1로 만든 캐시는 품질이
     ///    떨어져서, 그대로 두면 이미 본 파일에서는 개선이 보이지 않는다. 버전을 올려
     ///    다시 재생할 때 재생성되게 한다 (재생 위치 앞쪽부터 필요한 만큼만).
-    private static let cacheFormatVersion = 3
+    private static let cacheFormatVersion = 4
 
     /// 캐시 위치: ~/Library/Application Support/24dost/subtitles/<hash>.<lang>.<engine>.json
     /// 원본 폴더를 건드리지 않으려고 앱 지원 폴더에 둔다.
@@ -581,7 +594,7 @@ final class SubtitleGenerator: ObservableObject {
 
     private func loadCache() -> (cues: [SubtitleCue],
                                 covered: [(start: TimeInterval, end: TimeInterval)],
-                                coarse: [(start: TimeInterval, end: TimeInterval)])? {
+                                pending: [(start: TimeInterval, end: TimeInterval, tier: Int)])? {
         guard let url = cacheURL(),
               let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode(CachedSubtitles.self, from: data),
@@ -590,15 +603,24 @@ final class SubtitleGenerator: ObservableObject {
         let covered = decoded.covered
             .filter { $0.count == 2 && $0[1] > $0[0] }
             .map { (start: $0[0], end: $0[1]) }
-        let coarse = (decoded.coarse ?? [])
-            .filter { $0.count == 2 && $0[1] > $0[0] }
-            .map { (start: $0[0], end: $0[1]) }
-        return (decoded.cues, covered, coarse)
+        let pending = (decoded.pending ?? [])
+            .filter { $0.count == 3 && $0[1] > $0[0] }
+            .map { (start: $0[0], end: $0[1], tier: Int($0[2])) }
+        return (decoded.cues, covered, pending)
     }
 
     /// 정교화 창이 대상 구간 앞에서부터 열리는 길이. 인식기가 문맥을 쥔 상태로
     /// 대상 구간에 도달하게 하는 게 목적이라, 대상보다 넉넉히 앞서야 한다.
     private let refineLeadIn: TimeInterval = 60
+
+    /// 다음에 다시 만들 구간. 등급이 낮은 것부터, 같으면 앞쪽부터.
+    private func nextRefineTarget() -> (start: TimeInterval, end: TimeInterval, tier: Int)? {
+        pendingRefine.first
+    }
+
+    private func sortPendingRefine() {
+        pendingRefine.sort { ($0.tier, $0.start) < ($1.tier, $1.start) }
+    }
 
     /// 정교화 결과를 받아들일지 판단하고, 받아들이면 그 구간의 큐를 갈아끼운다.
     ///
@@ -606,30 +628,53 @@ final class SubtitleGenerator: ObservableObject {
     /// 옛것을 그대로 둔다. 개선한다면서 멀쩡한 자막을 지우는 건 안 하느니만 못하다.
     /// 채택 여부와 무관하게 대상은 목록에서 뺀다 — 안 그러면 같은 구간을 계속 다시 만든다.
     private func adoptRefined(_ produced: [SubtitleCue],
-                              for target: (start: TimeInterval, end: TimeInterval)) {
-        defer { dropCoarse(target) }
+                              for target: (start: TimeInterval, end: TimeInterval, tier: Int)) {
+        defer { dropPending(target) }
 
         // 창은 대상보다 길지만, 채택하는 건 대상 구간 안쪽뿐이다. 바깥은 이미 긴 창으로
         // 만들어 둔 자리라 건드릴 이유가 없다.
         let fresh = produced.filter { $0.start >= target.start && $0.start < target.end }
         let existing = cues.filter { $0.start >= target.start && $0.start < target.end }
-        guard !fresh.isEmpty, fresh.count >= existing.count else {
-            DostLog.log(String(format: "refine %.1f-%.1fs 기각 (새 %d, 기존 %d)",
-                               target.start, target.end, fresh.count, existing.count))
+        let freshChars = fresh.reduce(0) { $0 + $1.text.count }
+        let existingChars = existing.reduce(0) { $0 + $1.text.count }
+        DostLog.log(String(format: "  refine 후보 %.1f-%.1fs: 큐 %d→%d, 글자 %d→%d",
+                           target.start, target.end,
+                           existing.count, fresh.count, existingChars, freshChars))
+        // 개수만 보면 구멍이 있다 — 줄 수는 같은데 내용이 줄어든 결과가 통과한다.
+        // 실측에서 6→6 인데 글자가 65→60 으로 준 경우가 있었다. 둘 다 안 줄어야 채택한다.
+        guard !fresh.isEmpty, fresh.count >= existing.count, freshChars >= existingChars else {
+            DostLog.log(String(format: "refine %.1f-%.1fs tier%d→%d 기각 (큐 %d→%d, 글자 %d→%d)",
+                               target.start, target.end, target.tier, target.tier + 1,
+                               existing.count, fresh.count, existingChars, freshChars))
             return
         }
+        let newTier = target.tier + 1
         cues.removeAll { $0.start >= target.start && $0.start < target.end }
         for cue in fresh {
             var marked = cue
-            marked.isCoarse = false
+            marked.tier = newTier
             cues.insertSorted(marked)
         }
-        DostLog.log(String(format: "refine %.1f-%.1fs 채택 (새 %d, 기존 %d)",
-                           target.start, target.end, fresh.count, existing.count))
+        // 한 칸씩만 올린다 — 단계별 결과를 눈으로 비교할 수 있어야 하기 때문이다.
+        // 아직 최고 등급이 아니면 다음 차례를 위해 대기열에 되돌린다.
+        if newTier < SubtitleTier.max {
+            pendingRefine.append((target.start, target.end, newTier))
+            sortPendingRefine()
+        }
+        DostLog.log(String(format: "refine %.1f-%.1fs tier%d→%d 채택 (큐 %d→%d, 글자 %d→%d)",
+                           target.start, target.end, target.tier, newTier,
+                           existing.count, fresh.count, existingChars, freshChars))
     }
 
-    private func dropCoarse(_ target: (start: TimeInterval, end: TimeInterval)) {
-        coarseRanges.removeAll { abs($0.start - target.start) < 0.01 && abs($0.end - target.end) < 0.01 }
+    /// 방금 처리한 항목만 대기열에서 뺀다.
+    /// **등급까지 비교해야 한다** — 채택 뒤 같은 구간을 한 칸 올려 다시 넣는데,
+    /// 시작·끝만 보고 지우면 그 새 항목까지 같이 날아가 다음 단계가 사라진다.
+    private func dropPending(_ target: (start: TimeInterval, end: TimeInterval, tier: Int)) {
+        pendingRefine.removeAll {
+            abs($0.start - target.start) < 0.01
+                && abs($0.end - target.end) < 0.01
+                && $0.tier == target.tier
+        }
     }
 
     /// 생성 자막 캐시 폴더를 통째로 비운다. 지운 파일 수를 돌려준다.
@@ -679,7 +724,7 @@ final class SubtitleGenerator: ObservableObject {
         let payload = CachedSubtitles(version: Self.cacheFormatVersion,
                                       covered: persistableCoveredRanges().map { [$0.start, $0.end] },
                                       cues: cues,
-                                      coarse: coarseRanges.map { [$0.start, $0.end] })
+                                      pending: pendingRefine.map { [$0.start, $0.end, Double($0.tier)] })
         if let data = try? JSONEncoder().encode(payload) {
             try? data.write(to: url, options: .atomic)
             lastPersistedCount = cues.count
