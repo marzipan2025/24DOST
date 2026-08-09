@@ -341,7 +341,7 @@ private func subtitleTypeface(for text: String, baseSize: CGFloat) -> SubtitleTy
 
 /// 대기 화면 업데이트 안내 레이블. 화살표는 BPdots에 있는 "»" 글리프를 악센트 색으로 렌더.
 /// (BPdots에 "→" 글리프는 없음.)
-/// 600초 창으로 다시 만든 자막의 진단 색. 악센트 색과 확실히 구분되도록 형광 녹색.
+/// 300초 창으로 다시 만든 자막의 진단 색. 악센트 색과 확실히 구분되도록 형광 녹색.
 private let subtitleTierFineColor = Color(red: 0.22, green: 1.0, blue: 0.35)
 
 private let updatePlaceholderLabel = "Update"
@@ -982,7 +982,7 @@ private struct DotsOverlayView: View {
                 // 드러난다. 정교화가 진행될수록 형광 녹색이 늘어난다.
                 switch sampler.currentSubtitleTier {
                 case SubtitleTier.urgent?: overlayColor = fixedOverlayColor      // 60초
-                case SubtitleTier.fine?:   overlayColor = subtitleTierFineColor  // 600초
+                case SubtitleTier.fine?:   overlayColor = subtitleTierFineColor  // 300초
                 case .some:                overlayColor = accentColor            // 180초
                 case nil:                  overlayColor = fixedOverlayColor      // 외부·내장 자막
                 }

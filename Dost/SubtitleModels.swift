@@ -7,7 +7,7 @@ import Foundation
 enum SubtitleTier {
     static let urgent  = 0   // 60초  — 재생 위치에 준비된 게 없어 급히 만든 것
     static let relaxed = 1   // 180초 — 앞서 달리며 여유롭게 만든 것
-    static let fine    = 2   // 600초 — 할 일이 없을 때 다시 만든 것
+    static let fine    = 2   // 300초 — 할 일이 없을 때 다시 만든 것
     static let max     = fine
 }
 
@@ -19,7 +19,7 @@ struct SubtitleCue: Equatable, Sendable, Codable {
     /// 인식된 원문. 번역 전이거나 번역이 필요 없으면 text 와 동일.
     var sourceText: String
     /// 어느 길이의 창으로 만들어졌는지. 다시 만들면 올라간다.
-    /// 0 = 60초(급했을 때), 1 = 180초, 2 = 600초. 진단용 색 표시에 쓴다.
+    /// 0 = 60초(급했을 때), 1 = 180초, 2 = 300초. 진단용 색 표시에 쓴다.
     var tier: Int
 
     init(start: TimeInterval, end: TimeInterval, text: String,

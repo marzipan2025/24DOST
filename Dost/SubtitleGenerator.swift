@@ -135,7 +135,7 @@ final class SubtitleGenerator: ObservableObject {
     /// 캐시에는 쓰지 않아서, 파일을 다시 열면 한 번 더 시도한다.
     private var provisionalRanges: [(start: TimeInterval, end: TimeInterval)] = []
 
-    /// 최고 등급보다 낮은 창으로 만든 구간. 만들 게 다 떨어지면 여기를 600초 창으로
+    /// 최고 등급보다 낮은 창으로 만든 구간. 만들 게 다 떨어지면 여기를 300초 창으로
     /// 다시 만든다. 등급이 낮은 것부터 처리한다 — 60초로 급조한 쪽이 제일 아쉬우니까.
     ///
     /// coveredRanges 에 등급을 섞지 않고 따로 두는 이유는, 그쪽 병합 규칙이 탐색 정확성의
@@ -165,7 +165,7 @@ final class SubtitleGenerator: ObservableObject {
     private let urgentWindowLength: TimeInterval = 60
     private let relaxedWindowLength: TimeInterval = 180
     /// 할 일이 없을 때 다시 만들며 쓰는 창. 경계를 가장 적게 만드는 대신 오래 읽는다.
-    private let fineWindowLength: TimeInterval = 600
+    private let fineWindowLength: TimeInterval = 300
 
     /// 이 창을 사용자가 기다리고 있는지.
     ///
@@ -505,7 +505,7 @@ final class SubtitleGenerator: ObservableObject {
                     // (안 그러면 같은 창을 무한히 다시 읽는다) 캐시에는 남기지 않아서,
                     // 다음에 이 파일을 열면 한 번 더 시도한다.
                     if translated.isEmpty { self.provisionalRanges.append((boundary, nextCovered)) }
-                    // 최고 등급이 아닌 구간은 나중에 600초 창으로 다시 만들 대상으로 남긴다.
+                    // 최고 등급이 아닌 구간은 나중에 300초 창으로 다시 만들 대상으로 남긴다.
                     if tier < SubtitleTier.max, !translated.isEmpty {
                         self.pendingRefine.append((boundary, nextCovered, tier))
                         self.sortPendingRefine()
