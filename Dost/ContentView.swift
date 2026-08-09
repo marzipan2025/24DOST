@@ -169,6 +169,17 @@ final class PlayerLayerNSView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
+/// 영상↔인식 언어 동기화용. 본 뷰 체인에 onChange 를 하나 더 붙이면 타입 체커가
+/// 터져서 별도 modifier 로 뺐다 (MenuCommandObservers 와 같은 이유).
+private struct SourceLanguageSync: ViewModifier {
+    let signature: String
+    let onChange: () -> Void
+
+    func body(content: Content) -> some View {
+        content.onChange(of: signature) { _, _ in onChange() }
+    }
+}
+
 // MARK: - Menu command observers
 //
 // ContentView.body 가 .onReceive 를 너무 많이 붙여 Swift 타입체커가 타임아웃하는 것을 방지하기
@@ -711,8 +722,11 @@ private struct DotsOverlayView: View {
     let backgroundStyleLabel: String?
     let isEditingURL: Bool
     let urlBuffer: String
-    /// 자막 자동 검출 프롬프트 활성 여부. true 면 하단에 "SUBTITLE FOUND" 와 "X  USE" 노출.
+    /// 프롬프트 활성 여부. true 면 하단에 안내 문구와 "X  USE" 노출.
     let subtitlePromptActive: Bool
+    /// 프롬프트 문구. 사이드카 자막 검출이면 "SUBTITLE FOUND",
+    /// 다른 언어로 만들어 둔 자막이 있으면 그 언어를 알린다.
+    let promptMessage: String
     /// 재생 정보 오버레이. 파일명/시간 정보를 2줄로 표시한다.
     let playbackInfoTitle: String?
     let playbackInfoActive: Bool
@@ -788,7 +802,7 @@ private struct DotsOverlayView: View {
             overlayIsSubtitle = true
             preserveLineBreaks = true
         } else if subtitlePromptActive {
-            overlayRawText = "SUBTITLE FOUND"
+            overlayRawText = promptMessage
             overlayIsSubtitle = true
             preserveLineBreaks = false
         } else if let modeLabel = backgroundStyleLabel {
@@ -1422,6 +1436,82 @@ struct ContentView: View {
     /// 같은 폴더에서 자동 검출된 자막 파일. 값이 있으면 "SUBTITLE FOUND" 프롬프트 활성.
     /// 우선순위: URL 편집 > 자막 프롬프트 > 그밖의 것.
     @State private var subtitlePromptURL: URL? = nil
+    /// 다른 언어로 만들어 둔 자막이 있을 때의 프롬프트. 생성은 답할 때까지 멈춘다.
+    @State private var languagePrompt: (source: String, target: String)? = nil
+
+    /// 파일별로 마지막에 쓴 인식 언어. 인식 언어는 본래 **영상의 속성**인데 설정은
+    /// 앱 전역이라, 언어가 다른 영상을 번갈아 보면 열 때마다 물어보게 된다.
+    /// 영상마다 기억해 두고 열 때 맞춰 주면 그 질문이 사라진다.
+    /// 설정창의 항목은 "기록이 없는 새 영상의 기본값" 성격이 된다.
+    @AppStorage("24dost.subtitleSourceLanguages.v1") private var sourceLanguagesData: String = ""
+
+    private var rememberedSourceLanguages: [String: String] {
+        get {
+            guard let data = sourceLanguagesData.data(using: .utf8),
+                  let map = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
+            return map
+        }
+        nonmutating set {
+            if let data = try? JSONEncoder().encode(newValue),
+               let encoded = String(data: data, encoding: .utf8) {
+                sourceLanguagesData = encoded
+            }
+        }
+    }
+
+    /// 직전에 언어를 맞춰 준 영상. 같은 영상 안에서 사용자가 언어를 바꾼 것과
+    /// 영상이 바뀐 것을 구분하는 데 쓴다.
+    @State private var lastSyncedMediaKey: String? = nil
+
+    /// 영상 키와 인식 언어를 하나로 묶은 값. 둘 중 하나만 바뀌어도 동기화가 돈다.
+    private var sourceLanguageSyncSignature: String {
+        "\(currentPlaybackPositionKey ?? "")|\(subtitleSourceLanguage)"
+    }
+
+    /// 영상이 바뀌었으면 기억해 둔 언어로 맞추고, 언어가 바뀌었으면 지금 영상에 기록한다.
+    /// 한 곳에서 처리하는 이유는 뷰 체인에 onChange 를 더 붙이면 타입 체커가 터지기 때문.
+    private func syncSourceLanguageWithMedia() {
+        guard let key = currentPlaybackPositionKey else { return }
+
+        // 영상이 바뀐 경우: 기억해 둔 게 있으면 그 언어로 맞춘다.
+        // **기억이 없으면 아무것도 하지 않는다.** 여기서 현재 언어를 기록해 버리면
+        // 사용자가 고른 적 없는 값이 그 영상에 굳어, 잘못된 설정으로 한 번 열었을 때
+        // 다음부터 프롬프트조차 안 뜨게 된다. 기록은 "사용자가 이 영상에 대해 골랐다"는
+        // 뜻이어야 한다.
+        if lastSyncedMediaKey != key {
+            lastSyncedMediaKey = key
+            if let remembered = rememberedSourceLanguages[key],
+               remembered != subtitleSourceLanguage,
+               SubtitleDefaults.normalizedSourceLanguage(remembered) == remembered {
+                subtitleSourceLanguage = remembered
+            }
+            return
+        }
+
+        // 같은 영상을 보는 중에 언어가 바뀌었다 = 사용자가 고른 것. 기록한다.
+        rememberSourceLanguage(subtitleSourceLanguage)
+    }
+
+    private func rememberSourceLanguage(_ language: String) {
+        guard let key = currentPlaybackPositionKey else { return }
+        var map = rememberedSourceLanguages
+        guard map[key] != language else { return }
+        map[key] = language
+        rememberedSourceLanguages = map
+    }
+
+    /// 프롬프트가 떠 있는지. 두 종류가 같은 자리를 쓴다.
+    private var isPromptActive: Bool { subtitlePromptURL != nil || languagePrompt != nil }
+
+    private var promptMessage: String {
+        if let p = languagePrompt {
+            // "SUBTITLE IN JAPANESE" 는 자막 글자가 일본어라는 뜻으로 읽힌다. 실제로는
+            // 자막은 한국어이고 **인식에 쓴 언어**가 일본어다. 질문 형태로 두면
+            // USE/X 가 무엇에 대한 답인지 분명해진다.
+            return "USE \(SubtitleDefaults.sourceLanguageLabel(p.source).uppercased())?"
+        }
+        return "SUBTITLE FOUND"
+    }
     /// 우상단 도트를 누르고 있는 동안 true. onChanged가 연속 발생하므로 idempotent하게 갱신.
     @State private var isPeeking = false
     /// 항상 위 (floating window level). 풀스크린 중에는 시각적으로 비활성.
@@ -1501,7 +1591,9 @@ struct ContentView: View {
     private func applySubtitleSettings() {
         sampler.autoGenerateSubtitles = autoGenerateSubtitles
         let g = sampler.generator
-        g.sourceLocale = subtitleSourceLanguage.isEmpty ? nil : Locale(identifier: subtitleSourceLanguage)
+        let src = SubtitleDefaults.normalizedSourceLanguage(subtitleSourceLanguage)
+        if src != subtitleSourceLanguage { subtitleSourceLanguage = src }   // 옛 값 정리
+        g.sourceLocale = Locale(identifier: src)
         g.targetLanguage = Locale.Language(identifier: subtitleTargetLanguage)
         g.backend = TranslationBackend(rawValue: subtitleBackendRaw) ?? .apple
         g.claudeModel = claudeModel
@@ -1698,7 +1790,7 @@ struct ContentView: View {
             WindowDragArea(
                 onSingleClick: {
                     // peek 중에도 탭 재생/일시정지는 허용 (전체화면/일반 공통).
-                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil { return }
+                    if isEditingURL || isShowingPlaybackInfo || isPromptActive { return }
                     if isStandby {
                         _ = resumeLastMedia()
                     } else {
@@ -1706,13 +1798,13 @@ struct ContentView: View {
                     }
                 },
                 onDoubleClick: {
-                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil || isPeeking { return }
+                    if isEditingURL || isShowingPlaybackInfo || isPromptActive || isPeeking { return }
                     toggleMainAppFullscreen()
                 },
                 onRightClick: { point in
                     // 피크 중에도 허용 — 세로줄 클릭 탐색은 실제 영상을 보면서 쓸 때 오히려 유용하다.
                     // (우상단 도트는 피크 토글이라 아래에서 따로 제외한다.)
-                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil { return }
+                    if isEditingURL || isShowingPlaybackInfo || isPromptActive { return }
                     if isStandby { return }
                     if sampler.isLoadingMedia || sampler.isStaticContent { return }
                     
@@ -1750,11 +1842,11 @@ struct ContentView: View {
                     }
                 },
                 onScrollUp: {
-                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil { return }
+                    if isEditingURL || isShowingPlaybackInfo || isPromptActive { return }
                     sampler.volumeUp()
                 },
                 onScrollDown: {
-                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil { return }
+                    if isEditingURL || isShowingPlaybackInfo || isPromptActive { return }
                     sampler.volumeDown()
                 }
             )
@@ -1796,7 +1888,8 @@ struct ContentView: View {
                 backgroundStyleLabel: backgroundStyleLabel,
                 isEditingURL: isEditingURL,
                 urlBuffer: urlBuffer,
-                subtitlePromptActive: subtitlePromptURL != nil,
+                subtitlePromptActive: isPromptActive,
+                promptMessage: promptMessage,
                 playbackInfoTitle: currentPlaybackInfoTitle,
                 playbackInfoActive: isShowingPlaybackInfo,
                 isPeeking: isPeeking,
@@ -1814,8 +1907,8 @@ struct ContentView: View {
                 GeometryReader { geo in
                     playbackInfoButtonOverlay(size: geo.size)
                 }
-            } else if subtitlePromptURL != nil {
-                // 자막 프롬프트 "X  USE" 클릭 히트박스.
+            } else if isPromptActive {
+                // 프롬프트 "X  USE" 클릭 히트박스.
                 GeometryReader { geo in
                     subtitlePromptButtonOverlay(size: geo.size)
                 }
@@ -2036,6 +2129,11 @@ struct ContentView: View {
             onPlaybackEnded:        advancePlaylist,
             onOpenRecent:           handleOpenRecentNotification
         ))
+        .onReceive(sampler.generator.$otherLanguageCache) { pair in
+            languagePrompt = pair
+        }
+        .modifier(SourceLanguageSync(signature: sourceLanguageSyncSignature,
+                                     onChange: syncSourceLanguageWithMedia))
         .onChange(of: subtitleSettingsSignature) { oldValue, newValue in
             handleSubtitleSettingsChange(from: oldValue, to: newValue)
         }
@@ -2215,6 +2313,14 @@ struct ContentView: View {
     }
 
     private func acceptSubtitlePrompt() {
+        // 다른 언어 자막을 쓰겠다고 한 경우: 언어 설정을 그쪽으로 옮긴다.
+        // 설정이 바뀌면 생성기가 그 조합으로 다시 붙으면서 해당 캐시를 읽는다.
+        if let p = languagePrompt {
+            languagePrompt = nil
+            subtitleSourceLanguage = p.source
+            subtitleTargetLanguage = p.target
+            return
+        }
         guard let url = subtitlePromptURL else { return }
         subtitlePromptURL = nil
         if !sampler.loadExternalSubtitle(url: url) {
@@ -2224,6 +2330,12 @@ struct ContentView: View {
 
     /// 사용자가 X 거절 → 단순히 프롬프트만 닫음 (이번 세션 한정, 다음 파일 로드 시 재평가).
     private func dismissSubtitlePrompt() {
+        if languagePrompt != nil {
+            // 무시하고 지금 설정 그대로 생성을 시작한다.
+            languagePrompt = nil
+            sampler.generator.dismissOtherLanguagePrompt()
+            return
+        }
         subtitlePromptURL = nil
     }
 
@@ -2771,8 +2883,8 @@ struct ContentView: View {
             }
         }
 
-        // 자막 프롬프트 활성 시 Enter = USE, Esc = X. 다른 키는 평시대로.
-        if subtitlePromptURL != nil {
+        // 프롬프트 활성 시 Enter = USE, Esc = X. 다른 키는 평시대로.
+        if isPromptActive {
             switch event.keyCode {
             case 36, 76: acceptSubtitlePrompt(); return nil   // Enter → USE
             case 53:     dismissSubtitlePrompt(); return nil  // Esc   → X

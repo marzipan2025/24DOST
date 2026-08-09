@@ -1064,7 +1064,7 @@ struct SubtitleSettingsView: View {
 
     @State private var apiKeyDraft = ""
     @State private var apiKeySaved = ClaudeAPIKeyStore.hasKey
-    @State private var supportedSourceLocales: [(value: String, label: String)] = SubtitleSettingsView.sourceLanguageChoices
+    @State private var supportedSourceLocales: [(value: String, label: String)] = SubtitleDefaults.sourceLanguageChoices
 
     private var accentColor: Color { AppAccentColor.choice(for: accentColorRaw).color }
     private var backend: TranslationBackend { TranslationBackend(rawValue: backendRaw) ?? .apple }
@@ -1170,38 +1170,15 @@ struct SubtitleSettingsView: View {
         .task { await loadSupportedLocales() }
     }
 
-    /// 고를 수 있는 인식 언어. 시스템은 30개를 지원하지만 지역 변종이 대부분이라
-    /// 목록만 길고 고르기 어렵다. 인식 결과가 실제로 갈리는 것만 남겨 추렸다.
-    ///
-    /// **Auto 는 없앴다.** 감지 기능이 아니었다 — 시스템 선호 언어의 첫 번째를 그냥
-    /// 쓸 뿐이라, 한국어 맥에서 일본어 영상을 틀면 한국어로 인식을 시도해 쓰레기
-    /// 자막이 나왔다. 이름이 하는 일과 달라서 오해를 부르는 항목이었다.
-    static let sourceLanguageChoices: [(value: String, label: String)] = [
-        ("yue-CN", "Cantonese"),
-        ("zh-CN",  "Mandarin"),
-        ("en-GB",  "English (UK)"),
-        ("en-US",  "English (US)"),
-        ("fr-FR",  "French"),
-        ("de-DE",  "German"),
-        ("it-IT",  "Italian"),
-        ("ja-JP",  "Japanese"),
-        ("ko-KR",  "Korean"),
-        ("pt-BR",  "Portuguese (Brazil)"),
-        ("pt-PT",  "Portuguese (Portugal)"),
-        ("es-ES",  "Spanish (Spain)"),
-        ("es-MX",  "Spanish (Mexico)")
-    ]
-
     /// 위 목록 중 이 시스템이 실제로 인식할 수 있는 것만 남긴다.
     private func loadSupportedLocales() async {
         let supported = Set(await SpeechTranscriber.supportedLocales.map { $0.identifier(.bcp47).lowercased() })
-        let options = Self.sourceLanguageChoices.filter { supported.contains($0.value.lowercased()) }
+        let options = SubtitleDefaults.sourceLanguageChoices.filter { supported.contains($0.value.lowercased()) }
         await MainActor.run {
-            supportedSourceLocales = options.isEmpty ? Self.sourceLanguageChoices : options
+            supportedSourceLocales = options.isEmpty ? SubtitleDefaults.sourceLanguageChoices : options
             // 예전 "auto" 나 목록에서 사라진 지역 변종이 저장돼 있으면 기본값으로 옮긴다.
-            if !supportedSourceLocales.contains(where: { $0.value == sourceLanguage }) {
-                sourceLanguage = SubtitleDefaults.defaultSourceLanguage
-            }
+            let normalized = SubtitleDefaults.normalizedSourceLanguage(sourceLanguage)
+            if normalized != sourceLanguage { sourceLanguage = normalized }
         }
     }
 

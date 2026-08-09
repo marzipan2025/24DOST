@@ -38,6 +38,37 @@ enum SubtitleDefaults {
     static let defaultTarget = "ko"
     /// 인식 언어 기본값. 예전 "auto" 는 감지가 아니라 시스템 언어를 쓰는 것이어서 없앴다.
     static let defaultSourceLanguage = "en-US"
+
+    /// 고를 수 있는 인식 언어. 시스템은 30개를 지원하지만 지역 변종이 대부분이라
+    /// 목록만 길고 고르기 어렵다. 인식 결과가 실제로 갈리는 것만 남겨 추렸다.
+    static let sourceLanguageChoices: [(value: String, label: String)] = [
+        ("en-GB",  "English (UK)"),
+        ("en-US",  "English (US)"),
+        ("fr-FR",  "French"),
+        ("de-DE",  "German"),
+        ("it-IT",  "Italian"),
+        ("ja-JP",  "Japanese"),
+        ("ko-KR",  "Korean"),
+        ("pt-BR",  "Portuguese (Brazil)"),
+        ("pt-PT",  "Portuguese (Portugal)"),
+        ("es-ES",  "Spanish (Spain)"),
+        ("es-MX",  "Spanish (Mexico)"),
+        ("yue-CN", "Cantonese"),
+        ("zh-CN",  "Mandarin")
+    ]
+
+    /// 저장된 값이 목록에 있는지 확인하고, 아니면 기본값으로 바꿔 돌려준다.
+    /// 예전 "auto" 나 사라진 지역 변종이 남아 있을 수 있는데, 그대로 쓰면
+    /// Locale(identifier: "auto") 같은 엉터리 로케일이 인식기로 들어간다.
+    /// 설정 탭을 열지 않아도 통하도록 **쓰는 지점에서** 걸러야 한다.
+    static func normalizedSourceLanguage(_ stored: String) -> String {
+        sourceLanguageChoices.contains { $0.value == stored } ? stored : defaultSourceLanguage
+    }
+
+    /// BCP-47 → 사람이 읽는 이름. 목록에 없으면 식별자를 그대로 돌려준다.
+    static func sourceLanguageLabel(_ bcp47: String) -> String {
+        sourceLanguageChoices.first { $0.value.caseInsensitiveCompare(bcp47) == .orderedSame }?.label ?? bcp47
+    }
     static let defaultClaudeModel = "claude-haiku-4-5"
     static let defaultFastResponse: Double = 20
 }
@@ -190,7 +221,9 @@ final class SubtitleGenerator: ObservableObject {
             pendingRefine = cached.pending
             lastPersistedCount = cached.cues.count
         }
-        DostLog.log("attach url=\(sourceURL?.lastPathComponent ?? "nil") asset=\(asset != nil) cached=\(cues.count)")
+        // 지금 언어 조합으로 만든 게 없을 때만, 다른 언어로 만든 게 있는지 본다.
+        otherLanguageCache = cues.isEmpty ? findOtherLanguageCache() : nil
+        DostLog.log("attach url=\(sourceURL?.lastPathComponent ?? "nil") asset=\(asset != nil) cached=\(cues.count) other=\(otherLanguageCache.map { "\($0.source)_\($0.target)" } ?? "none")")
     }
 
     func detach() {
@@ -211,10 +244,21 @@ final class SubtitleGenerator: ObservableObject {
     }
 
     /// 생성 시작/재개.
+    ///
+    /// 다른 언어로 만들어 둔 캐시가 있으면 **사용자가 답할 때까지 시작하지 않는다.**
+    /// 언어 설정이 잘못된 채로 만들면 쓰레기 자막이 쌓이고, 그걸 나중에 알아채도
+    /// 이미 만들어진 것을 되돌리는 게 번거롭다. 만들기 전에 멈추는 게 맞다.
     func start() {
-        guard canGenerate else { return }
+        guard canGenerate, otherLanguageCache == nil else { return }
         isRunning = true
         pump()
+    }
+
+    /// 다른 언어 캐시 프롬프트에 답한다. 무시하면 지금 설정 그대로 생성을 시작한다.
+    /// (쓰겠다고 하면 호출부가 언어 설정을 바꾸고, 그 변경이 다시 attach 를 부른다.)
+    func dismissOtherLanguagePrompt() {
+        otherLanguageCache = nil
+        start()
     }
 
     /// 생성 중지. 이미 만든 큐는 그대로 남는다.
@@ -320,7 +364,10 @@ final class SubtitleGenerator: ObservableObject {
     /// (look-ahead 는 "이만큼은 확보돼야 한다"는 하한선으로 남아, leadSeconds 표시와
     /// 탐색 직후 우선순위 판단에 쓰인다.)
     private func pump(now: TimeInterval? = nil) {
-        guard isRunning, currentJob == nil, let asset else { return }
+        // 다른 언어 캐시 프롬프트가 떠 있으면 한 창도 만들지 않는다.
+        // start() 에만 걸면 새지 않는다 — attach 보다 start 가 먼저 불리는 경로가 있어서,
+        // 그때 isRunning 이 true 로 남아 이후 tick 에서 계속 돌아 버린다.
+        guard isRunning, otherLanguageCache == nil, currentJob == nil, let asset else { return }
         let playhead = now ?? lastTickTime ?? 0
 
         // 재생 헤드 뒤가 다 찼으면 처음부터 다시 훑어 건너뛴 구간을 찾는다.
@@ -699,6 +746,33 @@ final class SubtitleGenerator: ObservableObject {
                 && abs($0.end - target.end) < 0.01
                 && $0.tier == target.tier
         }
+    }
+
+    /// 이 영상에 대해 **다른 언어 조합으로 만들어 둔 캐시**가 있으면 그 조합.
+    /// 지금 설정으로는 자막이 없는데 예전에 다른 언어로 만든 게 있을 때만 값이 있다.
+    @Published private(set) var otherLanguageCache: (source: String, target: String)? = nil
+
+    /// 같은 영상(해시)의 다른 언어 캐시를 찾는다. 파일명은
+    /// `<해시>.<인식>_<대상>.<엔진>.json` 이라 가운데 칸만 다르다.
+    private func findOtherLanguageCache() -> (source: String, target: String)? {
+        guard let current = cacheURL() else { return nil }
+        let dir = current.deletingLastPathComponent()
+        let hash = String(current.lastPathComponent.prefix(while: { $0 != "." }))
+        guard let files = try? FileManager.default.contentsOfDirectory(at: dir,
+                                                                       includingPropertiesForKeys: nil) else { return nil }
+        for f in files where f.pathExtension == "json" && f.lastPathComponent != current.lastPathComponent {
+            let parts = f.lastPathComponent.split(separator: ".")
+            // [해시, 인식_대상, 엔진, json]
+            guard parts.count == 4, parts[0] == hash else { continue }
+            let langs = parts[1].split(separator: "_")
+            guard langs.count == 2 else { continue }   // 옛 형식(<해시>.<대상>.<엔진>)은 건너뛴다
+            // 내용이 비어 있으면 물어볼 값이 없다.
+            guard let data = try? Data(contentsOf: f),
+                  let decoded = try? JSONDecoder().decode(CachedSubtitles.self, from: data),
+                  !decoded.cues.isEmpty else { continue }
+            return (String(langs[0]), String(langs[1]))
+        }
+        return nil
     }
 
     /// 생성 자막 캐시 폴더를 통째로 비운다. 지운 파일 수를 돌려준다.
