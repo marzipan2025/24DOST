@@ -330,19 +330,25 @@ private let hangulSubtitleScale: CGFloat = 0.75
 /// 아니라 몇 초에 한 번 바뀌므로 이걸로 충분하다.
 @MainActor
 private enum SubtitleInk {
-    private static var cache: [String: (above: CGFloat, below: CGFloat)] = [:]
+    private static var cache: [String: (above: CGFloat, below: CGFloat, left: CGFloat, right: CGFloat)] = [:]
 
-    static func extent(of text: String, fontName: String, size: CGFloat) -> (above: CGFloat, below: CGFloat) {
+    /// above/below 는 베이스라인 기준 위/아래, left/right 는 그리기 원점 기준 가로 잉크 범위.
+    static func extent(of text: String, fontName: String, size: CGFloat)
+        -> (above: CGFloat, below: CGFloat, left: CGFloat, right: CGFloat) {
         let key = "\(fontName)|\(size)|\(text)"
         if let hit = cache[key] { return hit }
-        guard let font = NSFont(name: fontName, size: size) else { return (size, 0) }
+        guard let font = NSFont(name: fontName, size: size) else { return (size, 0, 0, 0) }
         let attributed = NSAttributedString(string: text, attributes: [.font: font])
         let line = CTLineCreateWithAttributedString(attributed)
         // CoreText 는 베이스라인이 원점이고 위쪽이 양수.
         let bounds = CTLineGetBoundsWithOptions(line, [.useGlyphPathBounds])
-        var result = (above: max(0, bounds.maxY), below: max(0, -bounds.minY))
+        let advance = (text as NSString).size(withAttributes: [.font: font]).width
+        var result = (above: max(0, bounds.maxY), below: max(0, -bounds.minY),
+                      left: bounds.minX, right: bounds.maxX)
         // 공백뿐이면 잉크가 없다. 캡슐이 납작해지지 않게 예전 기준으로 되돌린다.
-        if result.above <= 0 && result.below <= 0 { result = (above: font.capHeight, below: 0) }
+        if result.above <= 0 && result.below <= 0 {
+            result = (above: font.capHeight, below: 0, left: 0, right: advance)
+        }
         if cache.count > 64 { cache.removeAll() }
         cache[key] = result
         return result
@@ -1033,6 +1039,8 @@ private struct DotsOverlayView: View {
         // 어긋나면 글자 뒤 도트가 남거나 과하게 지워진다.
         let bodyFace = subtitleTypeface(for: overlayRawText, baseSize: sampler.subtitleFontSize)
         if let sr = subtitleRect, !subtitleLines.isEmpty {
+            // 캡슐이 그려질 때만 0 이 아니게 된다 — dot 모드·peek 아닌 상태는 전혀 영향받지 않는다.
+            var backdropTextShift: CGFloat = 0
             // peek 중 자막 배경 캡슐 색면. 설정 ON + 실제 자막(캡션)일 때만.
             // 텍스트 바로 뒤에 깔리도록 본문 렌더 직전에 그린다.
             let isRealSubtitle = sampler.hasSubtitles && sampler.showSubtitles
@@ -1046,7 +1054,13 @@ private struct DotsOverlayView: View {
                 // 좌우가 0.5 였을 때 글자가 캡슐 옆면에 밭게 붙어 보였다. 캡슐이 알약이라
                 // corner radius 가 높이의 절반인데, 한글은 캡슐이 높아져 radius(17.2)가
                 // 좌우 여백(13)보다 커진다 — 글자 시작점이 둥근 모서리 안쪽에 들어간다.
-                let padX = sampler.subtitleFontSize * 0.72
+                // 그래서 0.72 로 올렸는데, 이번엔 한글에서 우측이 글자에 거의 닿아 보인다는
+                // 지적이 있었다. 가로 폭 측정(advance width)이 실제 잉크보다 되레 살짝 넉넉한
+                // 것을 확인했으므로(세로 때와 반대 — 측정 버그 아님) 순수하게 시각적 밀도
+                // 차이다. 좌우를 비대칭으로 나눈다: 좌는 0.72 의 60%, 우는 (좌+우)/2 가
+                // "0.5→0.72 로 늘렸던 폭의 절반만" 늘린 값(0.61)이 되도록 역산한다.
+                let padXLeft: CGFloat = sampler.subtitleFontSize * 0.432   // 0.72 × 0.6
+                let padXRight: CGFloat = sampler.subtitleFontSize * 0.788  // 평균이 0.61 되도록
                 let padY = sampler.subtitleFontSize * 0.30
                 // 줄마다 실제 잉크 범위를 재서 캡슐이 글자를 확실히 감싸게 한다.
                 // (cap-height 가정으로는 한글을 못 잰다 — SubtitleInk 주석 참고)
@@ -1055,11 +1069,15 @@ private struct DotsOverlayView: View {
                 }
                 var inkTop = CGFloat.greatestFiniteMagnitude
                 var inkBottom = -CGFloat.greatestFiniteMagnitude
+                var inkLeft = CGFloat.greatestFiniteMagnitude
+                var inkRight = -CGFloat.greatestFiniteMagnitude
                 var tallestLine: CGFloat = 0
                 for (i, line) in subtitleLines.enumerated() {
                     let ink = SubtitleInk.extent(of: line, fontName: bodyFace.fontName, size: bodyFace.size)
                     inkTop = min(inkTop, baseline(i) - ink.above)
                     inkBottom = max(inkBottom, baseline(i) + ink.below)
+                    inkLeft = min(inkLeft, ink.left)
+                    inkRight = max(inkRight, ink.right)
                     tallestLine = max(tallestLine, ink.above + ink.below)
                 }
                 let inkCenterY = (inkTop + inkBottom) / 2
@@ -1068,9 +1086,34 @@ private struct DotsOverlayView: View {
                 // 라운딩은 한 줄(반원)일 때와 동일하게 유지된다.
                 let oneLineH = tallestLine + padY * 2
                 let cornerR = oneLineH / 2
-                // 우측 마진만 1px 줄임(좌측 padX 유지, 폭에서 1 차감).
-                let capRect = CGRect(x: sr.minX - padX, y: inkCenterY - capH / 2,
-                                     width: sr.width + padX * 2 - 1, height: capH)
+                // 가로도 세로와 같이 **실제 잉크**를 기준으로 잡는다. advance width 로 잡으면
+                // SwiftUI 가 그리는 폭과 미세하게 어긋나 우측 여백만 잠식된다.
+                // 이러면 좌/우 여백이 padXLeft / padXRight 그대로 나온다.
+                let capLeftX  = sr.minX + inkLeft  - padXLeft
+                let capRightX = sr.minX + inkRight + padXRight
+                let capRectUnshifted = CGRect(x: capLeftX, y: inkCenterY - capH / 2,
+                                              width: capRightX - capLeftX, height: capH)
+
+                // 왼쪽 여백을 하단 여백만큼 벌린다.
+                //
+                // 하단 여백(창 바닥 ~ 캡슐 바닥)은 grid 앵커가 이미 넉넉하고 잉크 기반이라
+                // 커서, 왼쪽 여백은 padXLeft 가 그대로 깎아 먹어 훨씬 좁다
+                // (실측: 960×540/26pt 예시에서 좌 21.3 vs 하 44.3, 2배 이상 차이). padXLeft 를
+                // 그대로 두고 좌 여백만 늘리려면 캡슐이 텍스트보다 왼쪽으로 밀려나야 하는데
+                // 그건 음수 padXLeft, 즉 글자가 캡슐 밖으로 나가야 한다는 뜻이라 불가능하다.
+                // 그래서 **캡슐과 텍스트를 함께 오른쪽으로 민다** — 도트 모드·peek 이 아닌
+                // 상태는 이 블록에 들어오지 않으므로 전혀 영향받지 않는다.
+                let bottomMargin = size.height - capRectUnshifted.maxY
+                let originalLeftMargin = capRectUnshifted.minX
+                let idealShift = max(0, bottomMargin - originalLeftMargin)
+                // 줄바꿈은 절대 다시 하지 않는다 — peek 을 켜고 끌 때 자막 줄 수가 바뀌면
+                // 안 된다. 그래서 "얼마나 밀어도 되는지"를 오른쪽 텍스트 폭으로 다시
+                // 재는 대신, **밀어도 오른쪽 여백이 원래 왼쪽 여백보다 좁아지지 않는
+                // 선까지만** 허용한다. 긴 줄은 밀 수 있는 만큼만 밀린다.
+                let maxShift = max(0, (size.width - originalLeftMargin) - capRectUnshifted.maxX)
+                let shift = min(idealShift, maxShift)
+
+                let capRect = capRectUnshifted.offsetBy(dx: shift, dy: 0)
                 // 자막 뒤 장면색(샘플 평균)을 색면 hue 소스로 전달 → 유채색 색면.
                 let sceneColor: Color? = sampN > 0
                     ? Color(.sRGB, red: sampR / Double(sampN),
@@ -1080,6 +1123,7 @@ private struct DotsOverlayView: View {
                     Path(roundedRect: capRect, cornerRadius: cornerR),
                     with: .color(subtitleBackdropColor(from: overlayColor, scene: sceneColor))
                 )
+                backdropTextShift = shift
             }
             let lineH = bodyFace.lineHeight
             for (i, line) in subtitleLines.enumerated() {
@@ -1089,8 +1133,9 @@ private struct DotsOverlayView: View {
                         .foregroundColor(overlayColor)
                 )
                 // 줄 상자는 기준 크기로 잡혀 있으므로, 작은 글자는 그 안에서 중앙에 놓는다.
+                // backdropTextShift 는 캡슐이 그려질 때만 0 이 아니다.
                 context.draw(resolved,
-                             at: CGPoint(x: sr.minX,
+                             at: CGPoint(x: sr.minX + backdropTextShift,
                                          y: sr.minY + CGFloat(i) * lineH + bodyFace.baselineOffset),
                              anchor: .topLeading)
             }
