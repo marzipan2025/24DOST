@@ -117,10 +117,6 @@ class VideoSampler: ObservableObject {
     @Published var hasSubtitles: Bool = false
     @Published var showSubtitles: Bool = true
     @Published var currentSubtitle: String = ""
-    /// 지금 보이는 자막을 만든 창 등급. 진단 색 표시용.
-    /// **생성 자막일 때만 값이 있다.** 외부·내장 자막은 만든 주체가 우리가 아니라
-    /// 등급이라는 개념 자체가 없으므로 nil 이고, 평소 색으로 그린다.
-    @Published var currentSubtitleTier: Int? = nil
     @Published var hasExternalSubtitle: Bool = false
     private enum SubtitleMode: Equatable {
         case off
@@ -562,7 +558,6 @@ class VideoSampler: ObservableObject {
         // 인 이유는, 지우자마자 다시 만들어 캐시를 되살리면 지운 게 아니기 때문이다.
         generator.discardAll()
         hasUsedGeneratedSubtitles = false
-        currentSubtitleTier = nil
         currentSubtitle = ""
         // 이 다음을 어떻게 할지는 **설정이 정한다** — 파일을 처음 열 때와 같은 규칙이다.
         // Generate When No Subtitles Exist 가 켜져 있으면 곧바로 다시 쌓기 시작하고,
@@ -577,7 +572,6 @@ class VideoSampler: ObservableObject {
         DostLog.log("applySubtitleMode: requested=\(subtitleMode) effective=\(mode) canGen=\(generator.canGenerate) hasEmb=\(hasEmbeddedSubtitle) hasExt=\(hasExternalSubtitle)")
         subtitleMode = mode
         showSubtitles = mode != .off
-        if mode != .generated { currentSubtitleTier = nil }
 
         if let item = player?.currentItem, let group = legibleGroup {
             switch mode {
@@ -665,7 +659,6 @@ class VideoSampler: ObservableObject {
         }
         let cue = generator.cues.cue(at: seconds)
         let text = cue?.text ?? ""
-        currentSubtitleTier = cue?.tier
         if currentSubtitle != text {
             DostLog.log(String(format: "cue @%.1fs hasSub=%@ show=%@ -> %@", seconds,
                                hasSubtitles ? "Y" : "N", showSubtitles ? "Y" : "N",
@@ -675,7 +668,6 @@ class VideoSampler: ObservableObject {
     }
 
     private func updateExternalSubtitle(at seconds: TimeInterval) {
-        currentSubtitleTier = nil
         guard hasExternalSubtitle, showSubtitles else { return }
         let text = externalCues.cue(at: seconds)?.text ?? ""
         if currentSubtitle != text { currentSubtitle = text }

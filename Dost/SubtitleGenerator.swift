@@ -806,7 +806,9 @@ final class SubtitleGenerator: ObservableObject {
             cues.insertSorted(marked)
         }
         normalizeCues()
-        // 한 칸씩만 올린다 — 단계별 결과를 눈으로 비교할 수 있어야 하기 때문이다.
+        // 한 칸씩만 올린다 (0→1→2). 원래 근거는 "단계별 결과를 색으로 비교하기 위해"
+        // 였는데 그 진단 색 표시는 제거했다(0.0.6.4). 동작은 그대로 두었다 — 곧바로
+        // 최고 등급으로 보내면 연산은 아끼지만, 중간 단계 결과를 아예 못 보게 된다.
         // 아직 최고 등급이 아니면 다음 차례를 위해 대기열에 되돌린다.
         if newTier < SubtitleTier.max {
             pendingRefine.append((target.start, target.end, newTier))

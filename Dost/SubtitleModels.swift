@@ -19,7 +19,7 @@ struct SubtitleCue: Equatable, Sendable, Codable {
     /// 인식된 원문. 번역 전이거나 번역이 필요 없으면 text 와 동일.
     var sourceText: String
     /// 어느 길이의 창으로 만들어졌는지. 다시 만들면 올라간다.
-    /// 0 = 60초(급했을 때), 1 = 180초, 2 = 300초. 진단용 색 표시에 쓴다.
+    /// 0 = 60초(급했을 때), 1 = 180초, 2 = 300초. 정교화 대상을 고르는 데 쓴다.
     var tier: Int
 
     init(start: TimeInterval, end: TimeInterval, text: String,
