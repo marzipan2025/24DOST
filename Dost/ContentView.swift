@@ -11,6 +11,8 @@ struct WindowDragArea: NSViewRepresentable {
     var onRightClick: ((CGPoint) -> Void)?
     var onScrollUp: (() -> Void)?
     var onScrollDown: (() -> Void)?
+    /// 확대 중이면 ⌘ 드래그가 "보는 위치 이동"이라 창이 따라 움직이면 안 된다.
+    var isContentZoomed: Bool = false
 
     func makeNSView(context: Context) -> WindowDragNSView {
         let view = WindowDragNSView()
@@ -35,6 +37,7 @@ struct WindowDragArea: NSViewRepresentable {
         nsView.onRightClick = onRightClick
         nsView.onScrollUp = onScrollUp
         nsView.onScrollDown = onScrollDown
+        nsView.isContentZoomed = isContentZoomed
     }
 
     func makeCoordinator() -> Coordinator {
@@ -94,12 +97,23 @@ class WindowDragNSView: NSView {
     private var scrollAccumulator: CGFloat = 0
     
     override var isFlipped: Bool { true }
-    override var mouseDownCanMoveWindow: Bool { true }
-    
-    // mouseDown 에서 performDrag를 즉시 호출하면 모바일 터치이벤트루프를 먹어버리므로, 
+
+    /// 확대 중일 때만 유효. ⌘ 드래그를 창 이동이 아니라 화면 이동으로 넘긴다.
+    var isContentZoomed: Bool = false
+
+    /// 창 이동은 여기서 시작된다 — AppKit 이 mouseDown 시점에 이 값을 물어본다.
+    /// 확대 상태의 ⌘ 드래그는 보는 위치를 옮기는 동작이라 창까지 끌리면 안 된다.
+    override var mouseDownCanMoveWindow: Bool {
+        !(isContentZoomed && NSEvent.modifierFlags.contains(.command))
+    }
+
+    // mouseDown 에서 performDrag를 즉시 호출하면 모바일 터치이벤트루프를 먹어버리므로,
     // 실제로 드래그가 발생할 때만 넘겨 싱글/더블 클릭 제스처가 씹히지 않게 함.
-    override func mouseDragged(with event: NSEvent) { 
-        window?.performDrag(with: event) 
+    override func mouseDragged(with event: NSEvent) {
+        // performDrag 는 자체 이벤트 루프를 돌려 이후 마우스 이벤트를 전부 먹는다.
+        // ⌘ 드래그(화면 이동)에서 이게 걸리면 SwiftUI 제스처가 첫 몇 이벤트만 받고 끊긴다.
+        if isContentZoomed, event.modifierFlags.contains(.command) { return }
+        window?.performDrag(with: event)
     }
     
     override func rightMouseUp(with event: NSEvent) {
@@ -163,7 +177,14 @@ final class PlayerLayerNSView: NSView {
 
     override func layout() {
         super.layout()
+        // 줌·리사이즈로 이 뷰의 크기가 매 단계 바뀐다(영상 전체 크기로 잡으므로).
+        // CALayer 는 frame 변경에 0.25초짜리 암시적 애니메이션을 붙이는데 — 레이어를
+        // 직접 만들어 붙인 서브레이어라 AppKit 이 막아주지 않는다 — 그러면 확대할 때마다
+        // 영상이 모서리에서 밀려 들어오는 모션이 생긴다. 즉시 반영해야 도트와 어긋나지 않는다.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         playerLayer.frame = bounds
+        CATransaction.commit()
     }
     // 피크 영역 위로 마우스가 지나가도 드래그나 다른 제스처를 막지 않도록 히트테스트 투과.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -482,6 +503,12 @@ final class CursorAutoHider {
     func stop() {
         timer?.invalidate(); timer = nil
         if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+    }
+    /// 마우스 이동이 아닌 이유로 커서를 다시 보여줘야 할 때(핀치 줌 앵커 확인).
+    /// 숨김 규칙은 mouseMoved 로만 풀리므로, 손가락만 움직이는 핀치에서는 직접 풀어야 한다.
+    func reveal() {
+        NSCursor.setHiddenUntilMouseMoves(false)
+        schedule()
     }
     private func schedule() {
         timer?.invalidate()
@@ -1659,6 +1686,9 @@ struct ContentView: View {
     @State private var pendingAutoResize: Bool = false
     
     @State private var dragAccumulator: CGSize = .zero
+    /// 캔버스 드래그가 무슨 동작인지. 제스처가 시작될 때 정해 끝날 때까지 유지한다.
+    private enum CanvasDragMode { case dotSettings, panContent }
+    @State private var canvasDragMode: CanvasDragMode?
     @State private var currentPlaybackPositionKey: String?
     @State private var restorePlaybackPositionTask: Task<Void, Never>?
 
@@ -1952,7 +1982,8 @@ struct ContentView: View {
                 onScrollDown: {
                     if isEditingURL || isShowingPlaybackInfo || isPromptActive { return }
                     sampler.volumeDown()
-                }
+                },
+                isContentZoomed: sampler.isContentZoomed
             )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -2088,8 +2119,24 @@ struct ContentView: View {
         .gesture(
             DragGesture(minimumDistance: 10)
                 .onChanged { value in
+                    // ⌘ 를 누른 채 시작했으면 확대해서 보고 있는 위치를 옮긴다.
+                    // 판정은 제스처 시작 때 한 번만 — 끄는 도중 ⌘ 를 놓았다고 도트 크기가
+                    // 변하기 시작하면 곤란하다. (DragGesture 값에는 수식 키가 없어서
+                    // 현재 키 상태를 직접 읽는다.)
+                    if canvasDragMode == nil {
+                        canvasDragMode = (sampler.isContentZoomed
+                                          && NSEvent.modifierFlags.contains(.command))
+                            ? .panContent : .dotSettings
+                    }
+                    if canvasDragMode == .panContent {
+                        sampler.panBy(dx: value.translation.width  - dragAccumulator.width,
+                                      dy: value.translation.height - dragAccumulator.height)
+                        dragAccumulator = value.translation
+                        return
+                    }
+
                     guard isFullscreen else { return }
-                    
+
                     let deltaX = value.translation.width - dragAccumulator.width
                     let deltaY = value.translation.height - dragAccumulator.height
                     
@@ -2113,6 +2160,7 @@ struct ContentView: View {
                 }
                 .onEnded { _ in
                     dragAccumulator = .zero
+                    canvasDragMode = nil
                 }
         )
         .background(
@@ -2172,10 +2220,11 @@ struct ContentView: View {
             releaseSleepAssertion()
             restorePlaybackPositionTask?.cancel()
         }
-        .onChange(of: isFullscreen)     { _, isFS in
+        .onChange(of: isFullscreen)     { _, _ in
             updateSleepPrevention()
-            // 콘텐츠 줌은 전체화면 전용 — 나가면 fit 으로 복귀.
-            if !isFS { sampler.zoomToFit() }
+            // 줌 1.0 의 기준 화면이 모드마다 다르다(전체화면 fit / 창 fill). 배율을 들고
+            // 넘어가면 같은 숫자가 다른 크기를 뜻해 화면이 튄다 — 양방향 모두 되돌린다.
+            sampler.zoomToFit()
         }
         .onChange(of: sampler.isPlaying) { _, _ in updateSleepPrevention() }
         .onChange(of: sampler.isPlaying) { _, isPlaying in
@@ -2633,13 +2682,25 @@ struct ContentView: View {
     private func peekVideoLayer(size: CGSize, player: AVPlayer) -> some View {
         let appCornerRadius: CGFloat = 32
         let cornerR: CGFloat = isFullscreen ? 0 : appCornerRadius
-        // 전체화면 콘텐츠 줌을 피크 원본 영상에도 동일 적용.
-        // aspect-fit 레이어를 같은 배율로 scale → 도트 줌과 동일한 중앙 크롭.
-        let zoom = isFullscreen ? sampler.currentEffectiveZoom() : 1
+        // 콘텐츠 줌을 피크 원본 영상에도 동일 적용.
+        //
+        // **영상 전체가 들어가는 사각형을 그 크기 그대로** 만들고, 창 중앙 기준으로 옮긴 뒤,
+        // 창 밖으로 나가는 부분을 잘라낸다.
+        //
+        // 창 크기 레이어에 scaleEffect + offset 을 거는 방식은 쓰면 안 된다. 창 모드의
+        // .resizeAspectFill 은 넘치는 부분을 **레이어가 이미 잘라 버려서**, 옮겨도 잘려나간
+        // 영상이 드러나는 게 아니라 뒤의 검은 배경이 나온다(전체화면은 .resizeAspect 라
+        // 영상 전체가 레이어 안에 있어 우연히 멀쩡했다).
+        //
+        // 확대하지 않았을 때는 이 사각형이 예전 그대로다 — 창 모드면 창을 덮는 크기,
+        // 전체화면이면 레터박스 포함 fit 크기.
+        let layout = sampler.peekContentLayout(displaySize: size)
 
         PlayerLayerView(player: player, isFullscreen: isFullscreen)
+            .frame(width:  layout?.size.width  ?? size.width,
+                   height: layout?.size.height ?? size.height)
+            .offset(x: layout?.offset.width ?? 0, y: layout?.offset.height ?? 0)
             .frame(width: size.width, height: size.height)
-            .scaleEffect(zoom)
             .clipShape(RoundedRectangle(cornerRadius: cornerR, style: .continuous))
     }
 
@@ -2967,13 +3028,30 @@ struct ContentView: View {
             if isEditingURL { return handleURLEditingKey(event) }
             return handlePlaybackKey(event)
         }
-        // 트랙패드 핀치 (전체화면 콘텐츠 줌). 뷰 히트테스트에 의존하지 않도록
+        // 트랙패드 핀치 (콘텐츠 줌, 창·전체화면 공통). 뷰 히트테스트에 의존하지 않도록
         // 키와 동일하게 로컬 이벤트 모니터로 받는다. magnification 은 이벤트당 증분값.
         magnifyMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { [self] event in
-            guard isFullscreen, !isEditingURL else { return event }
-            sampler.zoomBy(magnification: event.magnification)
+            guard !isEditingURL else { return event }
+            // 로컬 모니터는 앱 전체 이벤트를 받는다. 설정 창 위에서의 핀치까지 먹으면
+            // 보이지도 않는 뒤쪽 영상이 확대된다.
+            if let w = event.window, let host = hostWindow, w !== host { return event }
+            let anchor = zoomAnchor(for: event)
+            // 커서 자동 숨김은 전체화면에서만 돈다. 창 모드에서 부르면 오히려 숨김
+            // 타이머를 새로 걸어 커서가 사라진다.
+            if anchor != nil, isFullscreen { cursorHider.reveal() }
+            sampler.zoomBy(magnification: event.magnification, anchor: anchor)
             return nil
         }
+    }
+
+    /// 핀치 앵커 = 커서 위치. AppKit 은 좌하단 원점이라 y 를 뒤집어 캔버스 좌표에 맞춘다.
+    /// 캔버스는 창 전체를 덮으므로(ignoresSafeArea) 그 밖의 변환은 없다.
+    private func zoomAnchor(for event: NSEvent) -> CGPoint? {
+        let size = sampler.currentDisplaySize
+        guard size.width > 0, size.height > 0 else { return nil }
+        let height = (event.window ?? hostWindow)?.contentView?.bounds.height ?? size.height
+        let loc = event.locationInWindow
+        return CGPoint(x: loc.x, y: height - loc.y)
     }
 
     /// URL 편집 모드 전용 키 처리. Command 조합은 메뉴로 패스스루하되 ⌘V만 직접 처리.

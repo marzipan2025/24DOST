@@ -26,18 +26,30 @@ class VideoSampler: ObservableObject {
         let displayH: Int
         let frameGeneration: UInt64
         let zoomPermille: Int
+        // 줌 중심도 서명에 들어가야 한다. 빠지면 일시정지 상태에서 커서 기준으로 확대할 때
+        // 배율이 같은 구간(한계에 붙었을 때)에서 화면이 갱신되지 않는다.
+        let centerXPermille: Int
+        let centerYPermille: Int
     }
 
-    // 전체화면 콘텐츠 줌 (fit 대비 배율).
-    //   fit    = 화면 안에 비율 유지로 맞춤(기본, 여백 발생 가능)
-    //   fill   = 비율 유지로 화면을 꽉 채움(넘치는 부분 중앙 크롭)
-    //   custom = 핀치 제스처로 만든 임의 배율 (1.0 = fit)
+    // 콘텐츠 줌 (기본 화면 대비 배율). 1.0 이 뜻하는 기본 화면은 모드마다 다르다 —
+    // 전체화면은 fit(레터박스), 창 모드는 창을 꽉 채운 중앙 크롭이다. 두 모드가 원래
+    // 그렇게 다르게 그리므로(§3.3), 배율은 각자의 기본 화면 위에 얹힌다.
+    //   fit    = 기본 화면 그대로 (배율 1.0)
+    //   fill   = 비율 유지로 화면을 꽉 채움(넘치는 부분 크롭) — 전체화면 전용(⌘1)
+    //   custom = 핀치 제스처로 만든 임의 배율
     enum ContentZoom: Equatable {
         case fit
         case fill
         case custom(CGFloat)
     }
     @Published var contentZoom: ContentZoom = .fit
+
+    /// 콘텐츠 줌의 중심 — 원본 프레임의 정규화 좌표(0~1, 기본 정중앙).
+    /// 핀치는 커서 아래 지점을 붙잡아 두므로 확대하는 동안 이 값이 움직인다.
+    @Published private(set) var contentCenter = CGPoint(x: 0.5, y: 0.5)
+
+    private static let defaultContentCenter = CGPoint(x: 0.5, y: 0.5)
 
     static let maxContentZoom: CGFloat = 8.0
 
@@ -66,16 +78,133 @@ class VideoSampler: ObservableObject {
                              videoAspect: videoSize.width / videoSize.height)
     }
 
-    /// 핀치 제스처 증분 적용. 현재 실효 배율에서 이어서 커스텀 배율로 전환.
-    func zoomBy(magnification delta: CGFloat) {
-        guard currentDisplaySize.width > 0, currentDisplaySize.height > 0,
-              videoSize.width > 0, videoSize.height > 0 else { return }
-        let next = min(max(currentEffectiveZoom() * (1 + delta), 1.0), Self.maxContentZoom)
-        contentZoom = next <= 1.0 ? .fit : .custom(next)
+    /// 영상 전체가 화면에서 차지하는 크기(기본 화면 × 줌)와 디스플레이 크기.
+    /// 커서 앵커 계산과 피크 레이어 오프셋이 같은 값을 봐야 도트와 실영상이 어긋나지 않는다.
+    ///
+    /// 기본 화면은 모드마다 다르다. 전체화면은 fit(화면 안에 다 들어옴), 창 모드는
+    /// fill(창을 꽉 채우고 넘치는 쪽을 자름) — 각 모드가 실제로 그리는 방식 그대로다.
+    ///
+    /// `displaySize` 를 주면 그걸 쓴다. 창을 끌어 늘리는 중에는 SwiftUI 레이아웃이 먼저
+    /// 새 크기로 그리고 `currentDisplaySize` 는 그 뒤에 갱신돼서, 저장된 값을 쓰면 피크
+    /// 레이어가 한 프레임씩 뒤처진다.
+    private func zoomedContentSize(displaySize: CGSize? = nil) -> (scaled: CGSize, display: CGSize)? {
+        let size = displaySize ?? currentDisplaySize
+        let dispW = size.width, dispH = size.height
+        guard dispW > 0, dispH > 0, videoSize.width > 0, videoSize.height > 0 else { return nil }
+        let videoAspect = videoSize.width / videoSize.height
+        let wide = dispW / dispH > videoAspect      // 화면이 영상보다 옆으로 넓은가
+        let fitsHeight = isFullscreen ? wide : !wide
+        // fit  은 짧은 쪽에 맞춘다 → 넓은 화면이면 높이가 한계.
+        // fill 은 긴 쪽에 맞춘다  → 넓은 화면이면 너비가 한계.
+        let baseW: CGFloat, baseH: CGFloat
+        if fitsHeight {
+            baseH = dispH; baseW = baseH * videoAspect
+        } else {
+            baseW = dispW; baseH = baseW / videoAspect
+        }
+        let zoom = effectiveZoom(dispW: dispW, dispH: dispH, videoAspect: videoAspect)
+        return (CGSize(width: baseW * zoom, height: baseH * zoom),
+                CGSize(width: dispW, height: dispH))
     }
 
-    func zoomToFit()  { contentZoom = .fit }
-    func zoomToFill() { contentZoom = .fill }
+    /// 중심을 원본 밖으로 나가지 못하게 되돌린다. 이걸 매 줌 단계마다 하지 않으면
+    /// 축소할 때 가장자리에 빈 영역이 생긴다.
+    /// 보이는 영역이 그 축의 원본을 다 덮으면(레터박스가 생기는 축) 움직일 여지가 없어 0.5 로 고정된다.
+    private func clampContentCenter() {
+        guard let g = zoomedContentSize() else {
+            setContentCenter(Self.defaultContentCenter)
+            return
+        }
+        func clamp(_ v: CGFloat, visible: CGFloat, scaled: CGFloat) -> CGFloat {
+            guard scaled > 0 else { return 0.5 }
+            let half = min(visible, scaled) / scaled / 2   // 보이는 폭의 절반(원본 기준 비율)
+            guard half < 0.5 else { return 0.5 }
+            return min(max(v, half), 1 - half)
+        }
+        setContentCenter(CGPoint(
+            x: clamp(contentCenter.x, visible: g.display.width,  scaled: g.scaled.width),
+            y: clamp(contentCenter.y, visible: g.display.height, scaled: g.scaled.height)
+        ))
+    }
+
+    /// 값이 실제로 달라질 때만 발행한다. 창 크기 변경 경로에서도 불리므로,
+    /// 같은 값을 다시 넣어 레이아웃 도중 불필요한 갱신을 만들지 않는다.
+    private func setContentCenter(_ p: CGPoint) {
+        guard p != contentCenter else { return }
+        contentCenter = p
+    }
+
+    /// 핀치 제스처 증분 적용. 현재 실효 배율에서 이어서 커스텀 배율로 전환.
+    ///
+    /// `anchor` 는 커서 위치(디스플레이 좌표, 좌상단 원점). 주면 그 지점의 영상이 제자리에
+    /// 머무르도록 중심을 옮긴다 — 화면 한가운데가 아니라 보고 있던 곳이 커진다.
+    /// nil 이면 예전처럼 중앙 기준으로 확대된다.
+    func zoomBy(magnification delta: CGFloat, anchor: CGPoint? = nil) {
+        guard let before = zoomedContentSize() else { return }
+        let current = currentEffectiveZoom()
+        let next = min(max(current * (1 + delta), 1.0), Self.maxContentZoom)
+        // 한계(1.0 / max)에 붙은 뒤에도 앵커 보정을 계속하면 배율은 그대로인데 화면만
+        // 밀린다. 배율이 실제로 변할 때만 중심을 건드린다.
+        guard next != current else { return }
+
+        if let anchor, before.scaled.width > 0, before.scaled.height > 0, current > 0 {
+            // 커서 아래의 원본 좌표(정규화)를 먼저 구하고, 새 배율에서 그 점이 같은 화면
+            // 위치에 오도록 중심을 역산한다.
+            let scaledAfter = CGSize(width:  before.scaled.width  * (next / current),
+                                     height: before.scaled.height * (next / current))
+            let dx = anchor.x - before.display.width  / 2
+            let dy = anchor.y - before.display.height / 2
+            let u = CGPoint(x: contentCenter.x + dx / before.scaled.width,
+                            y: contentCenter.y + dy / before.scaled.height)
+            setContentCenter(CGPoint(x: u.x - dx / scaledAfter.width,
+                                     y: u.y - dy / scaledAfter.height))
+        }
+
+        if next <= 1.0 {
+            // 배율을 완전히 풀면 기본 화면으로 돌아온다. 창 모드에는 ⌘0/⌘1 같은 복귀
+            // 수단이 없어서(⌘0 은 창 크기 조절이다), 여기서 되돌리지 않으면 한쪽으로
+            // 치우친 크롭에 갇힌다. 전체화면은 fit 이라 어차피 중앙 고정이다.
+            contentZoom = .fit
+            setContentCenter(Self.defaultContentCenter)
+        } else {
+            contentZoom = .custom(next)
+            clampContentCenter()
+        }
+    }
+
+    /// 확대해서 보고 있는 위치를 옮긴다(⌘ 드래그). `dx`/`dy` 는 화면에서 끈 거리(포인트).
+    /// 화면을 오른쪽으로 끌면 영상도 오른쪽으로 따라와야 하므로 원본에서 읽는 위치는 왼쪽으로 간다.
+    ///
+    /// 확대하지 않았으면 아무 일도 하지 않는다. 창 모드의 기본 화면(꽉 채운 크롭)은 넘치는
+    /// 축에 여유가 남아 있어 그냥 두면 배율 1.0에서도 움직이는데, 그러면 핀치를 조금
+    /// 건드렸다 놓는 순간 중앙으로 되돌아가 버려서(§3.3) 앞뒤가 맞지 않는다.
+    func panBy(dx: CGFloat, dy: CGFloat) {
+        guard currentEffectiveZoom() > 1, let g = zoomedContentSize(),
+              g.scaled.width > 0, g.scaled.height > 0 else { return }
+        setContentCenter(CGPoint(x: contentCenter.x - dx / g.scaled.width,
+                                 y: contentCenter.y - dy / g.scaled.height))
+        clampContentCenter()
+    }
+
+    /// 확대 상태 여부. ⌘ 드래그를 창 이동에서 가로챌지 판단하는 데 쓴다.
+    var isContentZoomed: Bool { currentEffectiveZoom() > 1 }
+
+    /// 피크(실영상) 레이어가 놓일 자리 — **영상 전체**가 그려질 크기와, 창 중앙 기준 이동량.
+    /// 도트는 원본에서 읽는 위치를 옮기고 피크는 레이어를 옮긴다 — 둘이 같아야 피크로
+    /// 넘어갈 때 화면이 튀지 않는다.
+    ///
+    /// 크기를 영상 전체로 주는 게 핵심이다. 창 크기 레이어에 배율만 걸면 `.resizeAspectFill`
+    /// 이 넘치는 부분을 레이어 안에서 이미 잘라 버려서, 옮겨도 잘려나간 영상이 아니라
+    /// 뒤의 검은 배경이 드러난다.
+    func peekContentLayout(displaySize: CGSize) -> (size: CGSize, offset: CGSize)? {
+        guard let g = zoomedContentSize(displaySize: displaySize) else { return nil }
+        return (g.scaled,
+                CGSize(width:  (0.5 - contentCenter.x) * g.scaled.width,
+                       height: (0.5 - contentCenter.y) * g.scaled.height))
+    }
+
+    func zoomToFit()  { contentZoom = .fit;  contentCenter = Self.defaultContentCenter }
+    func zoomToFill() { contentZoom = .fill; contentCenter = Self.defaultContentCenter }
 
     @Published var dotColors: [[CGColor]] = []
     @Published var videoSize: CGSize = .zero
@@ -158,7 +287,11 @@ class VideoSampler: ObservableObject {
     private var overlayStartTime: Date?
     private let overlayDuration: TimeInterval = 0.5
 
-    var currentDisplaySize: CGSize = .zero
+    var currentDisplaySize: CGSize = .zero {
+        // 확대한 채로 창 크기를 바꾸면 보이는 영역이 넓어져 줌 중심이 범위를 벗어날 수 있다.
+        // 그대로 두면 가장자리에 빈 영역이 생긴다.
+        didSet { if currentDisplaySize != oldValue { clampContentCenter() } }
+    }
     /// 전체화면 여부. 도트 격자를 창에 꽉 채울지(창 모드) 비율을 지킬지(전체화면) 가른다.
     var isFullscreen: Bool = false
 
@@ -1339,7 +1472,9 @@ class VideoSampler: ObservableObject {
             displayW: Int(currentDisplaySize.width.rounded()),
             displayH: Int(currentDisplaySize.height.rounded()),
             frameGeneration: videoFrameGeneration,
-            zoomPermille: Int((sigZoom * 1000).rounded())
+            zoomPermille: Int((sigZoom * 1000).rounded()),
+            centerXPermille: Int((contentCenter.x * 1000).rounded()),
+            centerYPermille: Int((contentCenter.y * 1000).rounded())
         )
         if !didAdvanceFrame, sig == lastRenderSignature {
             return
@@ -1404,23 +1539,34 @@ class VideoSampler: ObservableObject {
             srcW = CGFloat(bufWidth)  * (visibleW / scaledW)
             srcH = CGFloat(bufHeight) * (visibleH / scaledH)
         } else {
-            // 창 모드: 격자가 창 전체를 덮고, 원본에서 창 비율에 맞는 중앙 영역만 읽는다.
+            // 창 모드: 격자가 창 전체를 덮고, 원본에서 창 비율에 맞는 영역만 읽는다.
             // 피크의 .resizeAspectFill 과 같은 방식이라 두 모드가 같은 화면이 된다.
-            // 창 모드에서는 줌이 항상 .fit(=1)이다(전체화면을 나올 때 zoomToFit 으로 되돌린다).
+            //
+            // 여기서는 줌이 그냥 나눗셈이다. 기본 화면(줌 1.0)이 이미 창을 꽉 채우고 있어
+            // 확대하면 읽는 영역이 그만큼 좁아질 뿐, 전체화면처럼 "확대해도 화면 안에
+            // 들어오는" 경우가 없다. 격자는 창 전체 기준이므로 줌과 무관하게 그대로다.
             cols = max(1, Int(dispW / gridSize))
             rows = max(1, Int(dispH / gridSize))
             let windowAspect = dispW / dispH
+            let baseW: CGFloat, baseH: CGFloat
             if windowAspect > videoAspect {
-                srcW = CGFloat(bufWidth)              // 창이 더 넓다 → 위아래를 자름
-                srcH = srcW / windowAspect
+                baseW = CGFloat(bufWidth)             // 창이 더 넓다 → 위아래를 자름
+                baseH = baseW / windowAspect
             } else {
-                srcH = CGFloat(bufHeight)             // 더 길다 → 좌우를 자름
-                srcW = srcH * windowAspect
+                baseH = CGFloat(bufHeight)            // 더 길다 → 좌우를 자름
+                baseW = baseH * windowAspect
             }
+            srcW = baseW / zoom
+            srcH = baseH / zoom
         }
 
-        let srcX0 = (CGFloat(bufWidth)  - srcW) / 2
-        let srcY0 = (CGFloat(bufHeight) - srcH) / 2
+        // 읽기 시작점은 줌 중심(핀치 앵커)을 따라간다. 확대하지 않았으면 중심이 0.5 라
+        // 예전과 같은 (bufWidth - srcW) / 2 가 된다.
+        // 중심이 가장자리로 치우쳐도 원본 밖을 읽지 않도록 여기서 한 번 더 가둔다.
+        let srcX0 = min(max(contentCenter.x * CGFloat(bufWidth)  - srcW / 2, 0),
+                        max(CGFloat(bufWidth)  - srcW, 0))
+        let srcY0 = min(max(contentCenter.y * CGFloat(bufHeight) - srcH / 2, 0),
+                        max(CGFloat(bufHeight) - srcH, 0))
 
         var newColors: [[CGColor]] = []
         newColors.reserveCapacity(rows)
@@ -1480,6 +1626,7 @@ class VideoSampler: ObservableObject {
         dotColors = []
         videoSize = .zero
         contentZoom = .fit
+        contentCenter = Self.defaultContentCenter
         isPlaying = false
         isStaticContent = false
         isAudioMode = false

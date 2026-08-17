@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────
-# make_dmg.sh  —  24DOST 0.0.5.12 DMG 패키져 (ffmpeg 임베드 포함)
+# make_dmg.sh  —  24DOST DMG 패키져 (ffmpeg 임베드 포함)
 # ─────────────────────────────────────────────────────────
 set -e
 
 APP_NAME="24DOST"
-VOL_NAME="24DOST 0.0.5.12"
-VERSION="0.0.6.4"
+VERSION="0.0.7"
+# 마운트되는 볼륨 이름. 예전엔 상수라 릴리스마다 옛 버전이 그대로 박혀 나갔다.
+VOL_NAME="${APP_NAME} ${VERSION}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
