@@ -2701,7 +2701,10 @@ struct ContentView: View {
                    height: layout?.size.height ?? size.height)
             .offset(x: layout?.offset.width ?? 0, y: layout?.offset.height ?? 0)
             .frame(width: size.width, height: size.height)
-            .clipShape(RoundedRectangle(cornerRadius: cornerR, style: .continuous))
+            // 창 CALayer 코너는 circular arc(기본값, masksToBounds). style 을 .continuous 로
+            // 주면 같은 32pt 라도 곡률이 달라서 두 호가 어긋나 보인다 — 스퀘어클이 더
+            // 파고드는 구간에 배경이 실선처럼 비친다. 창 마스크와 같은 기하로 맞춘다.
+            .clipShape(RoundedRectangle(cornerRadius: cornerR))
     }
 
     /// 피크 히트 영역: 우상단 visible 도트 한 칸 크기의 투명 영역.
