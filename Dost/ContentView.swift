@@ -2274,6 +2274,10 @@ struct ContentView: View {
             isFullscreen = false
             sampler.isFullscreen = false
             cursorHider.stop()
+            // 전체화면을 나오면 피크도 끝낸다 — 도트로 돌아가며 멈춘다(peekEnd 가 항상 pause).
+            // Esc 키가 아니라 여기에 거는 이유: Return·더블클릭·초록 버튼으로 나갈 때도
+            // 같아야 한다. 키에만 걸면 나가는 경로마다 결과가 달라진다.
+            endPeekIfNeeded()
             // 풀스크린 전에 항상 위가 켜져 있었다면 복원
             if isAlwaysOnTop { applyAlwaysOnTop(true) }
             sampler.backgroundDotAlpha = 0.40
@@ -2676,12 +2680,10 @@ struct ContentView: View {
 
     // MARK: 피크 (우상단 도트 프레스 = 실제 영상 노출)
 
-    /// 피크 영상 컨테이너. 창 전체를 채우며 앱 창 모서리 곡률(32pt)로 클립.
-    /// 풀스크린에서는 라운딩 없음.
+    /// 피크 영상 컨테이너. 창 전체를 채운다. 모서리 곡률은 여기서 만들지 않는다 —
+    /// 창 자체 마스크(`contentView.layer` cornerRadius 32 + masksToBounds)가 이미 자른다.
     @ViewBuilder
     private func peekVideoLayer(size: CGSize, player: AVPlayer) -> some View {
-        let appCornerRadius: CGFloat = 32
-        let cornerR: CGFloat = isFullscreen ? 0 : appCornerRadius
         // 콘텐츠 줌을 피크 원본 영상에도 동일 적용.
         //
         // **영상 전체가 들어가는 사각형을 그 크기 그대로** 만들고, 창 중앙 기준으로 옮긴 뒤,
@@ -2701,10 +2703,11 @@ struct ContentView: View {
                    height: layout?.size.height ?? size.height)
             .offset(x: layout?.offset.width ?? 0, y: layout?.offset.height ?? 0)
             .frame(width: size.width, height: size.height)
-            // 창 CALayer 코너는 circular arc(기본값, masksToBounds). style 을 .continuous 로
-            // 주면 같은 32pt 라도 곡률이 달라서 두 호가 어긋나 보인다 — 스퀘어클이 더
-            // 파고드는 구간에 배경이 실선처럼 비친다. 창 마스크와 같은 기하로 맞춘다.
-            .clipShape(RoundedRectangle(cornerRadius: cornerR))
+            // 여기서는 **직사각형으로만** 자른다(확대하면 위 사각형이 창보다 커지므로 잘라야 한다).
+            // 모서리 곡률을 여기서 또 주면 안 된다 — 창 자체 마스크와 이중으로 겹치는데,
+            // 영상 레이어는 GPU 가 따로 합성해서 그 위에 씌운 곡선 마스크가 계단처럼 나온다.
+            // 곡률은 창 마스크 하나에만 맡기면 배경·도트와 같은 경계를 그대로 쓴다.
+            .clipped()
     }
 
     /// 피크 히트 영역: 우상단 visible 도트 한 칸 크기의 투명 영역.
@@ -3158,8 +3161,16 @@ struct ContentView: View {
             }
             return nil
         case 53:                                                              // Esc
+            // Esc 의 도착지는 언제나 "창 + 도트 + 정지" 하나다.
+            // 전체화면이면 나가는 것만으로 피크까지 정리된다(didExitFullScreen).
             if isFullscreen {
                 toggleMainAppFullscreen()
+                return nil
+            }
+            // tap to peek 은 명시적 토글이라 커서를 치워도 안 꺼진다. 키보드 탈출구를 준다.
+            // (누르고 있기 모드는 커서가 도트를 벗어나면 알아서 끝나므로 건드리지 않는다.)
+            if tapToPeek, isPeeking {
+                endPeekIfNeeded()
                 return nil
             }
             return event

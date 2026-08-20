@@ -634,6 +634,7 @@ struct ShortcutsSettingsView: View {
     private let playbackKeyInputs: [ShortcutItem] = [
         .init(input: "Space", action: "Play, pause, or resume last media"),
         .init(input: "Return", action: "Toggle fullscreen"),
+        .init(input: "Esc", action: "Leave fullscreen, or exit peek in Tap to Peek"),
         .init(input: "Left / Right", action: "Seek backward or forward by 10 seconds"),
         .init(input: "Shift + Left / Right", action: "Open previous or next file"),
         .init(input: ", / .", action: "Move one timeline column left or right"),
