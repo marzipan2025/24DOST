@@ -279,16 +279,18 @@ enum AppAccentColor: String, CaseIterable, Identifiable {
     }
 }
 
+/// 자막 웨이트가 굵어지는 경계. **영문·한글이 이 값 하나를 공유한다.**
+/// 크기가 이 값을 넘으면 Bold, 이하면 Regular — 두 단계뿐이고 Light 는 쓰지 않는다.
+/// 자막 크기는 18pt 부터 4pt 씩 올라가므로(§VideoSampler) 실제 분기는 34 / 38 사이다.
+let subtitleBoldThreshold: CGFloat = 34
+
 /// 자막 폰트 크기에 따라 적절한 폰트 웨이트를 반환.
-/// 작은 크기는 Bold 로 가독성 확보, 큰 크기는 Light 로 과중량 방지, 중간은 Regular.
-///   ≤ 26pt  → Bold
-///   30~38pt → Regular
-///   ≥ 42pt  → Light
+/// 큰 크기일수록 굵게 간다 — 크게 키운 자막은 존재감을 주려는 것이므로 무게도 따라가야 한다.
+///   ≤ 34pt → Regular
+///   > 34pt → Bold
 /// PostScript 이름 주의: Regular 는 접미사 없이 "BPdotsUnicase" 로 등록되어 있음.
 private func dotsFontName(forSize size: CGFloat) -> String {
-    if size >= 42 { return "BPdotsUnicase-Light" }
-    if size >= 30 { return "BPdotsUnicase" }       // Regular
-    return "BPdotsUnicase-Bold"
+    size > subtitleBoldThreshold ? "BPdotsUnicase-Bold" : "BPdotsUnicase"
 }
 
 /// 자막에 한글이 한 글자라도 있으면 한글 자막으로 본다.
@@ -384,12 +386,10 @@ private func subtitleTypeface(for text: String, baseSize: CGFloat) -> SubtitleTy
                                 lineHeight: lineHeight, baselineOffset: 0)
     }
     let size = baseSize * hangulSubtitleScale
-    let name: String
-    // 한글은 획이 조밀해서 작은 크기에 굵은 웨이트를 쓰면 뭉개진다. 대신 큰 크기에서
-    // 가늘게 가야 도트 자막과 무게가 맞는다. 전환 기준은 BPdots 와 같은 비율(42/30).
-    if size >= 42 * hangulSubtitleScale { name = "KorailL" }
-    else if size >= 30 * hangulSubtitleScale { name = "KorailM" }
-    else { name = "KorailB" }
+    // 영문과 **같은 규칙·같은 경계**다. 비교는 축소 전 크기(baseSize)로 한다 — 사용자가
+    // 조절하는 값이 그것이고, 축소 배율이 바뀌어도 경계가 따라 움직이면 안 되기 때문이다.
+    // 코레일체에는 Regular 가 없어서 그 자리는 Medium 이 대신한다(Light 는 쓰지 않는다).
+    let name = baseSize > subtitleBoldThreshold ? "KorailB" : "KorailM"
     // BPdots 였다면 베이스라인이 놓였을 자리에 맞춘다. 두 폰트의 ascender 차이만큼 내린다.
     let dotAscender = NSFont(name: dotName, size: baseSize)?.ascender ?? baseSize
     let hangulAscender = NSFont(name: name, size: size)?.ascender ?? size

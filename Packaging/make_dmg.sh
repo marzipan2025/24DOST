@@ -5,7 +5,7 @@
 set -e
 
 APP_NAME="24DOST"
-VERSION="0.0.7.1"
+VERSION="0.0.7.2"
 # 마운트되는 볼륨 이름. 예전엔 상수라 릴리스마다 옛 버전이 그대로 박혀 나갔다.
 VOL_NAME="${APP_NAME} ${VERSION}"
 
