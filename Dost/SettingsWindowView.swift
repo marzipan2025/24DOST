@@ -663,6 +663,7 @@ struct ShortcutsSettingsView: View {
         .init(input: "Fullscreen Drag", action: "Adjust dot size and spacing"),
         .init(input: "Pinch", action: "Zoom content around the pointer"),
         .init(input: "Cmd + Drag", action: "Move the view while zoomed in"),
+        .init(input: "Top-Left Dot", action: "Quit the app"),
         .init(input: "Peek Dot", action: "Hold to peek, or tap-toggle when Tap to Peek is on")
     ]
 

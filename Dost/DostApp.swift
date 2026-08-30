@@ -770,6 +770,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// 사용자가 직접 닫는 경우(⌘W)는 Close Window 명령이 직접 종료시킨다.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    /// 종료 직전에 돌려야 하는 정리. ContentView 가 등록한다 — 저장에 필요한 상태가 거기 있다.
+    static var willTerminateCleanup: (() -> Void)?
+
+    /// **모든 종료 경로가 여기를 지난다** — ⌘Q, ⌘W(Close Window), 좌상단 도트, Dock 종료.
+    /// SwiftUI 의 onDisappear 는 앱이 꺼질 때 도는 게 보장되지 않아서, 정리를 거기에만
+    /// 두면 생성한 자막 캐시와 재생 위치를 잃는다.
+    func applicationWillTerminate(_ notification: Notification) {
+        Self.willTerminateCleanup?()
+    }
+
     /// Dock 아이콘 클릭 등으로 되돌아왔을 때 창이 내려가 있으면 다시 올린다.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { Self.presentPlaybackWindow() }

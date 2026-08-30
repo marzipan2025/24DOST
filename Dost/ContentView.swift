@@ -616,6 +616,17 @@ private struct DotGridLayout {
         return col
     }
 
+    /// 종료 히트박스 앵커: 최좌상단 visible 도트. (위에서 아래로, 각 행의 왼쪽부터 탐색)
+    func findTopLeftAnchor() -> (row: Int, col: Int)? {
+        for rowIdx in 1..<(totalRows - 1) {
+            for colIdx in 1..<(totalCols - 1) {
+                let c = center(row: rowIdx, col: colIdx)
+                if !isCornerMasked(c.x, c.y) { return (rowIdx, colIdx) }
+            }
+        }
+        return nil
+    }
+
     /// 피크 히트박스 앵커: 최우상단 visible 도트. (위에서 아래로, 각 행의 오른쪽부터 탐색)
     func findTopRightAnchor() -> (row: Int, col: Int)? {
         for rowIdx in 1..<(totalRows - 1) {
@@ -1788,6 +1799,19 @@ struct ContentView: View {
 
     /// 피크 가능 조건: 실제 영상이 로드되어 있고, URL 편집 중이 아니며, 로딩 중이 아님.
     /// 정적 이미지는 제외(재생 의미 없음).
+    /// 좌상단 도트로 종료할 수 있는 상태.
+    ///
+    /// **실제 도트가 그려질 때(= 도트 모드/피크 모드)만**이다. 대기 화면과 로딩 중에는
+    /// 격자가 영상이 아니라 제외하고, 무언가 묻고 있을 때(URL 입력·재생 정보·프롬프트)도
+    /// 뺀다 — 보이지 않는 버튼이라 그런 상태에서 눌리면 실수로 꺼지는 것과 구별되지 않는다.
+    private var canQuitByCornerDot: Bool {
+        !sampler.dotColors.isEmpty
+            && !sampler.isLoadingMedia
+            && !isEditingURL
+            && !isShowingPlaybackInfo
+            && !isPromptActive
+    }
+
     private var canPeek: Bool {
         sampler.previewPlayer != nil
             && sampler.videoSize != .zero
@@ -2064,6 +2088,14 @@ struct ContentView: View {
                 }
             }
 
+            // 종료 히트박스: 좌상단 visible 도트 1개 영역. 눌러서 앱 종료.
+            // 우상단 피크 도트와 대칭인 숨은 조작 — 눈에 보이는 버튼은 없다.
+            if canQuitByCornerDot {
+                GeometryReader { geo in
+                    quitHitArea(size: geo.size)
+                }
+            }
+
             // Always on Top 표시: 2px 여백 + 1px 악센트 테두리.
             // 앱 라운딩(32pt)과 동심원으로, 창 안쪽 2.5pt(= 2px gap + 0.5px 선 반폭) 위치에 렌더.
             if isAlwaysOnTop && !isFullscreen {
@@ -2185,6 +2217,13 @@ struct ContentView: View {
             // 매 실행 호출해도 실제 팝업은 최초 1회(그리고 앱이 새로 서명된 뒤)뿐이다.
             Task { await AppleSpeechTranscriber.requestAuthorizationIfNeeded() }
             installKeyMonitor()
+            // 종료 정리를 앱 델리게이트에 건다. 아래 onDisappear 에도 같은 정리가 있지만
+            // 그건 앱이 꺼질 때 도는 게 보장되지 않는다 — 이걸 걸지 않으면 ⌘Q·⌘W·좌상단
+            // 도트 어느 쪽으로 꺼도 생성한 자막 캐시와 재생 위치를 잃는다.
+            AppDelegate.willTerminateCleanup = {
+                sampler.generator.flushCache()
+                persistCurrentPlaybackPositionIfNeeded()
+            }
             Task { updateAvailableVersion = await UpdateChecker.availableUpdateVersion() }
             DispatchQueue.main.async {
                 if let hostWindow {
@@ -2708,6 +2747,39 @@ struct ContentView: View {
             // 영상 레이어는 GPU 가 따로 합성해서 그 위에 씌운 곡선 마스크가 계단처럼 나온다.
             // 곡률은 창 마스크 하나에만 맡기면 배경·도트와 같은 경계를 그대로 쓴다.
             .clipped()
+    }
+
+    /// 종료 히트 영역: 좌상단 visible 도트 한 칸 크기의 투명 영역.
+    /// 우상단 피크 도트와 같은 방식의 숨은 조작이고, 도트·피크 모드 모두에서 동작한다.
+    @ViewBuilder
+    private func quitHitArea(size: CGSize) -> some View {
+        let grid = sampler.gridSize
+        let rows = sampler.dotColors.count
+        let cols = sampler.dotColors.first?.count ?? 0
+        let layout = makeDotGridLayout(
+            size: size, grid: grid, dotDiameter: sampler.dotDiameter,
+            rowsOverride: rows > 0 ? rows : nil,
+            colsOverride: cols > 0 ? cols : nil,
+            isFullscreen: isFullscreen
+        )
+        // 격자가 아주 좁으면(작은 창 + 넓은 간격) 좌상단과 우상단 앵커가 같은 도트가 된다.
+        // 그때는 그 자리를 피크에 양보한다 — 종료는 ⌘Q 로도 되지만 피크를 부를 데는 여기뿐이다.
+        let peekAnchor = canPeek ? layout.findTopRightAnchor() : nil
+        if let anchor = layout.findTopLeftAnchor(),
+           !(peekAnchor?.row == anchor.row && peekAnchor?.col == anchor.col) {
+            let c = layout.center(row: anchor.row, col: anchor.col)
+            Color.clear
+                .contentShape(Rectangle())
+                .frame(width: grid, height: grid)
+                .position(x: c.x, y: c.y)
+                .onTapGesture { quitApp() }
+        }
+    }
+
+    /// 좌상단 도트 = 앱 종료.
+    /// 저장은 `AppDelegate.applicationWillTerminate` 가 한다 — ⌘Q·⌘W 와 같은 경로다.
+    private func quitApp() {
+        NSApp.terminate(nil)
     }
 
     /// 피크 히트 영역: 우상단 visible 도트 한 칸 크기의 투명 영역.
