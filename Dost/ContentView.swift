@@ -236,6 +236,52 @@ private struct MenuCommandObservers: ViewModifier {
 
 private let indicatorColorPlay  = Color.white                                        // 흰색 100%
 
+/// 도트 격자를 그릴 도형.
+///
+/// **크기는 두 모양이 공유한다** — `dotDiameter` 가 원의 지름이자 사각형의 한 변이다.
+/// 같은 설정값이 모양에 따라 다른 크기를 뜻하면 W/S 로 맞춰 둔 화면이 전환할 때마다
+/// 어긋난다. 사각형이 원보다 넓이가 4/π(약 27%) 크게 보이는 건 의도된 결과다.
+enum DotShape: String, CaseIterable, Identifiable {
+    static let storageKey = "24dost.dotShape"
+    static let defaultChoice: DotShape = .circle
+
+    case circle
+    case square
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .circle: return "Circle"
+        case .square: return "Square"
+        }
+    }
+
+    static func choice(for raw: String) -> DotShape {
+        DotShape(rawValue: raw) ?? defaultChoice
+    }
+
+    /// 간격 0 으로 맞붙은 사각형의 이음매를 지우는 여유(포인트).
+    ///
+    /// 인접한 두 사각형이 경계를 정확히 공유하면 격자 원점이 소수점이라 그 경계가 픽셀
+    /// 한가운데 걸린다. 각자 절반씩 덮은 걸 합성하면 75% 만 차서 **배경색 격자선이 옅게
+    /// 비친다.** 살짝 키워 겹쳐 그리면 사라진다. 원은 접점에서만 닿아 해당이 없고,
+    /// 간격이 1 이상 남아 있으면 겹칠 일이 없으므로 0 이다.
+    func seamOutset(gridSize: CGFloat, dotDiameter: CGFloat) -> CGFloat {
+        guard self == .square, gridSize - dotDiameter <= 0 else { return 0 }
+        return 0.5
+    }
+
+    /// 화면 Canvas 와 PNG 내보내기가 **같은 경로**를 쓰도록 여기 한 곳에서만 만든다.
+    /// 렌더 경로가 둘이라 각자 그리면 한쪽만 모양이 바뀌는 사고가 난다.
+    func path(in rect: CGRect) -> Path {
+        switch self {
+        case .circle: return Path(ellipseIn: rect)
+        case .square: return Path(rect)     // 라운딩 없음 — 원과 대비가 분명해야 한다
+        }
+    }
+}
+
 enum AppAccentColor: String, CaseIterable, Identifiable {
     static let storageKey = "24dost.accentColor"
     static let defaultChoice: AppAccentColor = .pink
@@ -789,6 +835,8 @@ private struct DotsOverlayView: View {
     /// 풀스크린 배경 스타일. brightTextMode 계산 시 참조. 비풀스크린 모드에서는 무시됨.
     let fullscreenBackgroundStyle: FullscreenBackgroundStyle
     let adaptiveSubtitleColor: Bool
+    /// 도트를 원으로 그릴지 사각형으로 그릴지. (설정 Appearance)
+    let dotShape: DotShape
     /// peek 중 자막 아래에 반투명 캡슐 색면을 까는 옵션. (설정 Appearance)
     let subtitleBackdropWhilePeeking: Bool
     let backgroundStyleLabel: String?
@@ -836,6 +884,9 @@ private struct DotsOverlayView: View {
     private func draw(context: inout GraphicsContext, size: CGSize) {
         let grid = sampler.gridSize
         let dotD = sampler.dotDiameter
+        // 간격 0 인 사각형만 값이 붙는다. 세 군데 도트가 모두 같은 사각형을 써야
+        // 앵커·테두리 도트만 이음매가 남는 일이 없다.
+        let seam = dotShape.seamOutset(gridSize: grid, dotDiameter: dotD)
 
         // 그리드 차원 결정
         let rows = sampler.dotColors.count
@@ -989,9 +1040,10 @@ private struct DotsOverlayView: View {
                         ? accentColor : indicatorColorPlay
                     if let peekAnchor, rowIdx == peekAnchor.row, colIdx == peekAnchor.col {
                         let dotRect = CGRect(x: c.x - layout.half, y: c.y - layout.half, width: dotD, height: dotD)
+                            .insetBy(dx: -seam, dy: -seam)
                         // 깜빡임이 꺼진 위상에서도 앵커는 계속 보여야 한다 — 피크를 되돌릴
                         // 유일한 표적이라서 사라지면 안 된다.
-                        context.fill(Path(ellipseIn: dotRect),
+                        context.fill(dotShape.path(in: dotRect),
                                      with: .color(hasOverlay && isBlinkOn ? blinkColor : indicatorColorPlay))
                         continue
                     }
@@ -1004,7 +1056,8 @@ private struct DotsOverlayView: View {
                        !shouldHideDot(at: c, rect: subtitleHideRect, half: layout.half),
                        !shouldHideDot(at: c, rect: rightBlockHideRect, half: layout.half) {
                         let dotRect = CGRect(x: c.x - layout.half, y: c.y - layout.half, width: dotD, height: dotD)
-                        context.fill(Path(ellipseIn: dotRect), with: .color(blinkColor))
+                            .insetBy(dx: -seam, dy: -seam)
+                        context.fill(dotShape.path(in: dotRect), with: .color(blinkColor))
                     }
                     continue
                 }
@@ -1014,13 +1067,14 @@ private struct DotsOverlayView: View {
                 if shouldHideDot(at: c, rect: rightBlockHideRect, half: layout.half) { continue }
 
                 let dotRect = CGRect(x: c.x - layout.half, y: c.y - layout.half, width: dotD, height: dotD)
+                            .insetBy(dx: -seam, dy: -seam)
                 let color = dotColor(
                     row: rowIdx, col: colIdx, rows: rows, cols: cols,
                     layout: layout,
                     effect: effect, hasOverlay: hasOverlay, isBlinkOn: isBlinkOn,
                     placeholderColor: placeholderColor
                 )
-                context.fill(Path(ellipseIn: dotRect), with: .color(color))
+                context.fill(dotShape.path(in: dotRect), with: .color(color))
             }
         }
 
@@ -1673,6 +1727,7 @@ struct ContentView: View {
     @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = false
     @AppStorage("autoResizeWindowToVideo") private var autoResizeWindowToVideo = true
     @AppStorage("adaptiveSubtitleColor") private var adaptiveSubtitleColor = true
+    @AppStorage(DotShape.storageKey) private var dotShapeRaw = DotShape.defaultChoice.rawValue
     // 자동 생성 자막 설정 — 값이 바뀌면 generator 에 그대로 밀어 넣는다.
     @AppStorage(SubtitleDefaults.autoGenerate)     private var autoGenerateSubtitles = false
     @AppStorage(SubtitleDefaults.sourceLanguage)   private var subtitleSourceLanguage = SubtitleDefaults.defaultSourceLanguage
@@ -1765,6 +1820,8 @@ struct ContentView: View {
     private var accentColor: Color {
         AppAccentColor.choice(for: accentColorRaw).color
     }
+
+    private var dotShape: DotShape { DotShape.choice(for: dotShapeRaw) }
 
     private var urlLoadErrorPresented: Binding<Bool> {
         Binding(
@@ -2043,6 +2100,7 @@ struct ContentView: View {
                 backgroundStyle: backgroundStyle,
                 fullscreenBackgroundStyle: fullscreenBackgroundStyle,
                 adaptiveSubtitleColor: adaptiveSubtitleColor,
+                dotShape: dotShape,
                 subtitleBackdropWhilePeeking: subtitleBackdropWhilePeeking,
                 backgroundStyleLabel: backgroundStyleLabel,
                 isEditingURL: isEditingURL,
@@ -3086,6 +3144,7 @@ struct ContentView: View {
         autoResizeWindowToVideo = true
         adaptiveSubtitleColor = true
         accentColorRaw = AppAccentColor.defaultChoice.rawValue
+        dotShapeRaw = DotShape.defaultChoice.rawValue
         backgroundStyleRaw = BackgroundStyle.blur.rawValue
         fullscreenBackgroundStyleRaw = FullscreenBackgroundStyle.black.rawValue
         lastMediaKind = ""
@@ -3344,6 +3403,8 @@ struct ContentView: View {
         ) else { return nil }
 
         let r = dotD / 2 * scale
+        // 화면과 같은 규칙 — 내보낸 PNG 에만 격자선이 남으면 안 된다.
+        let seam = dotShape.seamOutset(gridSize: grid, dotDiameter: dotD) * scale
         for row in 1..<(rows - 1) {
             let line = sampler.dotColors[row]
             guard line.count == cols else { continue }
@@ -3352,7 +3413,12 @@ struct ContentView: View {
                 // CGContext 는 좌하단 원점 → 위아래를 뒤집어 row 0 이 상단에 오게 한다.
                 let cy = CGFloat(pxH) - (CGFloat(row) * grid + grid / 2) * scale
                 ctx.setFillColor(line[col])
-                ctx.fillEllipse(in: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2))
+                // 화면 Canvas 와 같은 경로 생성기를 쓴다 — 렌더러가 둘이라
+                // 각자 그리면 화면만 사각형이고 내보낸 PNG 는 원으로 남는다.
+                ctx.addPath(dotShape.path(in: CGRect(x: cx - r, y: cy - r,
+                                                     width: r * 2, height: r * 2)
+                                             .insetBy(dx: -seam, dy: -seam)).cgPath)
+                ctx.fillPath()
             }
         }
 

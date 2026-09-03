@@ -325,6 +325,7 @@ struct GeneralSettingsView: View {
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     @AppStorage("tapToPeek") private var tapToPeek = false
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
+    @AppStorage(DotShape.storageKey) private var dotShapeRaw = DotShape.defaultChoice.rawValue
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @State private var isResetConfirmationVisible = false
     @State private var isCacheClearConfirmationVisible = false
@@ -353,6 +354,17 @@ struct GeneralSettingsView: View {
             }
 
             SettingsSection("Appearance") {
+                SettingsRow("Dot Shape") {
+                    HStack(spacing: 10) {
+                        ForEach(DotShape.allCases) { choice in
+                            DotShapeSwatch(
+                                choice: choice,
+                                isSelected: dotShapeRaw == choice.rawValue,
+                                action: { dotShapeRaw = choice.rawValue }
+                            )
+                        }
+                    }
+                }
                 SettingsRow("Accent Color", showDivider: false) {
                     HStack(spacing: 10) {
                         ForEach(AppAccentColor.allCases) { choice in
@@ -575,6 +587,33 @@ private struct AccentColorSwatch: View {
                 Circle()
                     .stroke(Color.primary.opacity(0.14), lineWidth: 0.5)
             )
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .help(choice.label)
+        .accessibilityLabel(choice.label)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+}
+
+/// 도트 모양 선택 스와치. 악센트 색 스와치와 같은 22pt 틀·같은 선택 표기를 쓴다.
+/// 채우기는 실제 도트처럼 악센트 색을 쓰고, 미선택은 흐리게 둔다.
+private struct DotShapeSwatch: View {
+    let choice: DotShape
+    let isSelected: Bool
+    let action: () -> Void
+    @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
+
+    var body: some View {
+        let accent = AppAccentColor.choice(for: accentColorRaw).color
+        Button(action: action) {
+            ZStack {
+                // 실제 렌더와 같은 경로 생성기 — 설정에서 본 모양이 화면 모양과 같아야 한다.
+                choice.path(in: CGRect(x: 4, y: 4, width: 14, height: 14))
+                    .fill(isSelected ? accent : settingsInactiveText)
+            }
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .focusable(false)
