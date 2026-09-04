@@ -238,15 +238,19 @@ private let indicatorColorPlay  = Color.white                                   
 
 /// 도트 격자를 그릴 도형.
 ///
-/// **크기는 두 모양이 공유한다** — `dotDiameter` 가 원의 지름이자 사각형의 한 변이다.
-/// 같은 설정값이 모양에 따라 다른 크기를 뜻하면 W/S 로 맞춰 둔 화면이 전환할 때마다
-/// 어긋난다. 사각형이 원보다 넓이가 4/π(약 27%) 크게 보이는 건 의도된 결과다.
+/// **크기는 세 모양이 공유한다** — `dotDiameter` 가 원의 지름이자 사각형의 한 변이고,
+/// 별의 뿔 끝을 잇는 원의 지름이다. 같은 설정값이 모양에 따라 다른 크기를 뜻하면
+/// W/S 로 맞춰 둔 화면이 전환할 때마다 어긋난다. 사각형이 원보다 넓이가 4/π(약 27%)
+/// 커 보이고 별이 그보다 작아 보이는 건 의도된 결과다.
+///
+/// **순서가 곧 설정 화면의 순서다**(`allCases`) — 원, 사각형, 별.
 enum DotShape: String, CaseIterable, Identifiable {
     static let storageKey = "24dost.dotShape"
     static let defaultChoice: DotShape = .circle
 
     case circle
     case square
+    case star
 
     var id: String { rawValue }
 
@@ -254,6 +258,7 @@ enum DotShape: String, CaseIterable, Identifiable {
         switch self {
         case .circle: return "Circle"
         case .square: return "Square"
+        case .star: return "Star"
         }
     }
 
@@ -278,6 +283,69 @@ enum DotShape: String, CaseIterable, Identifiable {
         switch self {
         case .circle: return Path(ellipseIn: rect)
         case .square: return Path(rect)     // 라운딩 없음 — 원과 대비가 분명해야 한다
+        case .star:   return Self.starPath(in: rect)
+        }
+    }
+
+    // MARK: 별
+
+    /// 뿔 하나가 차지하는 각의 절반(36°). 꼭짓점 열 개가 이 각으로 번갈아 놓인다.
+    private static let starHalfStep: CGFloat = .pi / 5
+
+    /// **뿔이 아닌 안쪽 꼭짓점의 내각.** 이 값 하나가 별의 살집을 정한다.
+    /// 키울수록 뚱뚱해진다 — 120° 로 시작했다가 128° 로 올렸다.
+    private static let starInnerAngle: CGFloat = 128 * .pi / 180
+
+    /// 안쪽/바깥 반지름 비 ≈ 0.522. `내각 128°` 에서 역산한 값이다 —
+    /// 안쪽 꼭짓점에 모인 두 변이 이루는 각이 `starInnerAngle` 이 되려면
+    /// `r = R(cos36° − sin36°/tan(내각/2))` 여야 한다.
+    /// 정오각별(0.382, 내각 108°)보다 안쪽이 넓어 면적이 크다 — 그게 목적이다.
+    /// 숫자를 박아 넣지 않는 이유는 내각을 손보면 비율이 따라와야 하기 때문이다.
+    private static let starRadiusRatio: CGFloat =
+        cos(starHalfStep) - sin(starHalfStep) / tan(starInnerAngle / 2)
+
+    /// 뿔 끝의 내각 ≈ 56°. 위 비율에서 따라 나오는 값이라 같이 계산한다.
+    /// 선을 안쪽에 그릴 때(`strokeInsetScale`) 얼마나 물려야 하는지에 쓴다.
+    private static let starTipAngle: CGFloat = 2 * atan(
+        starRadiusRatio * sin(starHalfStep) / (1 - starRadiusRatio * cos(starHalfStep))
+    )
+
+    /// 반시계 10°. y 가 아래로 증가하는 좌표계라 각을 **빼면** 반시계로 돈다.
+    private static let starRotation: CGFloat = -10 * .pi / 180
+
+    /// 뿔 끝이 바깥 원에 닿는 오각별. 바깥 반지름은 원의 반지름과 같다.
+    private static func starPath(in rect: CGRect) -> Path {
+        let outerR = min(rect.width, rect.height) / 2
+        let innerR = outerR * starRadiusRatio
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        // 회전이 없으면 첫 뿔이 12시(-90°)를 향한다.
+        let start = -CGFloat.pi / 2 + starRotation
+
+        var path = Path()
+        for i in 0..<5 {
+            let outerA = start + CGFloat(i) * 2 * starHalfStep   // 뿔 간격 72°
+            let innerA = outerA + starHalfStep
+            let outer = CGPoint(x: center.x + outerR * cos(outerA),
+                                y: center.y + outerR * sin(outerA))
+            let inner = CGPoint(x: center.x + innerR * cos(innerA),
+                                y: center.y + innerR * sin(innerA))
+            if i == 0 { path.move(to: outer) } else { path.addLine(to: outer) }
+            path.addLine(to: inner)
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    /// `strokeBorder` 로 선을 **안쪽**에 그릴 때 경로를 줄일 배수.
+    ///
+    /// 원·사각형은 변이 법선 방향으로 그대로 밀리니 1 이면 된다. 별은 뿔이 뾰족해서,
+    /// 꼭짓점을 `d` 만큼 안으로 당겨도 선의 바깥 모서리가 `d / sin(뿔 내각/2)`,
+    /// 56° 뿔에서는 약 2.13배만큼 다시 밖으로 나간다. 1 배로 두면 설정 스와치의
+    /// 별만 22pt 틀을 뚫고 나가 옆 스와치와 크기가 어긋난다.
+    var strokeInsetScale: CGFloat {
+        switch self {
+        case .circle, .square: return 1
+        case .star: return 1 / sin(Self.starTipAngle / 2)
         }
     }
 
@@ -293,7 +361,9 @@ enum DotShape: String, CaseIterable, Identifiable {
     func backdropCornerRadius(oneLineHeight: CGFloat) -> CGFloat {
         switch self {
         case .circle: return oneLineHeight / 2
-        case .square: return 0
+        // 별을 자막 뒤에 깔 수는 없으니 각진 쪽에 붙인다 — 뿔이 선 도형이라
+        // 알약보다 각진 사각형이 가깝다.
+        case .square, .star: return 0
         }
     }
 }
@@ -593,7 +663,11 @@ struct DotMark: Shape, InsettableShape {
     let shape: DotShape
     var inset: CGFloat = 0
 
-    func path(in rect: CGRect) -> Path { shape.path(in: rect.insetBy(dx: inset, dy: inset)) }
+    func path(in rect: CGRect) -> Path {
+        // 물리는 양은 모양마다 다르다 — 별은 뿔 때문에 더 줄여야 선이 틀 안에 남는다.
+        let d = inset * shape.strokeInsetScale
+        return shape.path(in: rect.insetBy(dx: d, dy: d))
+    }
     func inset(by amount: CGFloat) -> DotMark { DotMark(shape: shape, inset: inset + amount) }
 }
 
