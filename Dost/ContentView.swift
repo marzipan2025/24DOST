@@ -280,6 +280,22 @@ enum DotShape: String, CaseIterable, Identifiable {
         case .square: return Path(rect)     // 라운딩 없음 — 원과 대비가 분명해야 한다
         }
     }
+
+    /// 자막 배경 색면의 모서리 반경. 도트와 **같은 규칙**을 따른다 — 원이면 알약,
+    /// 사각형이면 각진 직사각형(사각 도트에 라운딩을 주지 않는 것과 같다).
+    ///
+    /// 색면의 여백은 모양이 바뀌어도 그대로 둔다. 사각형은 모서리가 없으니 좌우 여백을
+    /// 줄일 수도 있지만, 그러면 같은 자막이 모양을 바꿀 때마다 다른 크기로 보인다 —
+    /// `dotDiameter` 를 두 모양이 공유하는 것과 같은 이유다.
+    ///
+    /// - Parameter oneLineHeight: **한 줄짜리** 색면의 높이. 줄 수가 늘어도 라운딩은
+    ///   한 줄(반원)일 때와 같아야 하므로 색면의 실제 높이를 쓰면 안 된다.
+    func backdropCornerRadius(oneLineHeight: CGFloat) -> CGFloat {
+        switch self {
+        case .circle: return oneLineHeight / 2
+        case .square: return 0
+        }
+    }
 }
 
 enum AppAccentColor: String, CaseIterable, Identifiable {
@@ -567,17 +583,36 @@ final class CursorAutoHider {
 // MARK: - Remuxing Indicator
 
 /// 최신 점 크기/간격을 그대로 사용. 점 개수는 호출자가 결정(짝수=4, 홀수=3).
+/// `DotShape` 를 SwiftUI 뷰로 쓰기 위한 얇은 래퍼 — 경로는 `DotShape.path(in:)` 그대로다.
+/// 격자 밖에서 도트를 그리는 곳이 자기 모양을 따로 만들면, 설정에서 사각형을 골라도
+/// 그 자리만 원으로 남는다. 로딩 인디케이터와 설정 스와치가 함께 쓴다(파일이 달라 internal).
+///
+/// `InsettableShape` 까지 채우는 건 `strokeBorder` 때문이다 — `stroke` 는 선이 경로 위에
+/// 걸쳐 절반이 틀 밖으로 나가서, 같은 22pt 로 맞춰도 악센트 스와치보다 커 보인다.
+struct DotMark: Shape, InsettableShape {
+    let shape: DotShape
+    var inset: CGFloat = 0
+
+    func path(in rect: CGRect) -> Path { shape.path(in: rect.insetBy(dx: inset, dy: inset)) }
+    func inset(by amount: CGFloat) -> DotMark { DotMark(shape: shape, inset: inset + amount) }
+}
+
 private struct RemuxingIndicator: View {
     let dotDiameter: CGFloat
     let gap: CGFloat
     let count: Int
     let accentColor: Color
+    let shape: DotShape
     @State private var activeIndex = 0
 
     var body: some View {
         HStack(spacing: gap) {
             ForEach(0..<count, id: \.self) { i in
-                Circle()
+                // 이음매 여유(`DotShape.seamOutset`)는 여기서만 쓰지 않는다. 격자의 도트는
+                // 불투명이라 겹쳐 그려도 티가 안 나지만, 꺼진 도트는 15% 반투명이라 겹친
+                // 띠만 두 번 합성돼 되레 **밝은 선**이 생긴다 — 15% 알파에서 배경이 살짝
+                // 비치는 쪽이 눈에 덜 띈다.
+                DotMark(shape: shape)
                     .fill(i == activeIndex ? accentColor : accentColor.opacity(0.15))
                     .frame(width: dotDiameter, height: dotDiameter)
                     .animation(.easeInOut(duration: 0.2), value: activeIndex)
@@ -1164,10 +1199,10 @@ private struct DotsOverlayView: View {
                 }
                 let inkCenterY = (inkTop + inkBottom) / 2
                 let capH = (inkBottom - inkTop) + padY * 2
-                // 한 줄 기준 캡슐 높이의 절반을 corner radius로 고정 → 줄 수가 늘어도
-                // 라운딩은 한 줄(반원)일 때와 동일하게 유지된다.
+                // 모서리는 도트 모양을 따라간다(원=알약, 사각형=각진 직사각형).
+                // 한 줄 기준 높이를 넘겨 → 줄 수가 늘어도 라운딩은 한 줄(반원)일 때와 같다.
                 let oneLineH = tallestLine + padY * 2
-                let cornerR = oneLineH / 2
+                let cornerR = dotShape.backdropCornerRadius(oneLineHeight: oneLineH)
                 // 가로도 세로와 같이 **실제 잉크**를 기준으로 잡는다. advance width 로 잡으면
                 // SwiftUI 가 그리는 폭과 미세하게 어긋나 우측 여백만 잠식된다.
                 // 이러면 좌/우 여백이 padXLeft / padXRight 그대로 나온다.
@@ -2079,7 +2114,8 @@ struct ContentView: View {
                         dotDiameter: sampler.dotDiameter,
                         gap: g - sampler.dotDiameter,
                         count: count,
-                        accentColor: accentColor
+                        accentColor: accentColor,
+                        shape: dotShape
                     )
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
                 }

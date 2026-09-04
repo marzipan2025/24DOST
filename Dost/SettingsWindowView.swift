@@ -584,8 +584,13 @@ private struct AccentColorSwatch: View {
             }
             .frame(width: 22, height: 22)
             .overlay(
+                // `stroke` 가 아니라 `strokeBorder` — 선을 경로 위에 걸치면 절반(0.25pt)이
+                // 틀 밖으로 삐져나가 스와치가 22.5pt 가 된다. 같은 22pt 틀을 쓰는 위줄
+                // 도트 모양 스와치보다 좌우로 0.25pt 씩 더 나가서, 오른쪽 정렬된 두 줄의
+                // 왼쪽 끝이 어긋나 보였다(노란 원 vs 위줄 원). 안쪽으로 그려 바깥 모서리를
+                // 두 스와치가 정확히 공유하게 한다.
                 Circle()
-                    .stroke(Color.primary.opacity(0.14), lineWidth: 0.5)
+                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
@@ -596,24 +601,39 @@ private struct AccentColorSwatch: View {
     }
 }
 
-/// 도트 모양 선택 스와치. 악센트 색 스와치와 같은 22pt 틀·같은 선택 표기를 쓴다.
-/// 채우기는 실제 도트처럼 악센트 색을 쓰고, 미선택은 흐리게 둔다.
+/// 도트 모양 선택 스와치.
+///
+/// 악센트 색 스와치와 **같은 22pt 틀을 가득 채운다** — 예전엔 22pt 틀 안에 14pt 도형만
+/// 그려서 바로 아래 줄의 악센트 원보다 눈에 띄게 작았다.
+///
+/// 형태는 악센트 스와치와 **일부러 다르다**. 악센트는 "색"을 고르는 것이라 색면이 꽉 찬
+/// 원이고, 이쪽은 "모양"을 고르는 것이라 **윤곽선이 주인공**이다 — 선을 굵게 세우고 색면은
+/// 같은 색을 딤해서(어두운 배경 위 22% 알파 → 낮은 채도로 가라앉는다) 뒤로 물린다.
+/// 둘이 같은 표기를 쓰면 색 고르는 줄이 하나 더 있는 것처럼 보인다.
 private struct DotShapeSwatch: View {
     let choice: DotShape
     let isSelected: Bool
     let action: () -> Void
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
 
+    /// 악센트 스와치와 같은 값이어야 한다 — 두 줄의 스와치 크기가 어긋나면 바로 보인다.
+    private static let side: CGFloat = 22
+    private static let lineWidth: CGFloat = 1.5
+
     var body: some View {
         let accent = AppAccentColor.choice(for: accentColorRaw).color
+        let line = isSelected ? accent : settingsInactiveText
+        let fillColor = isSelected ? accent.opacity(0.22) : Color.white.opacity(0.06)
         Button(action: action) {
-            ZStack {
-                // 실제 렌더와 같은 경로 생성기 — 설정에서 본 모양이 화면 모양과 같아야 한다.
-                choice.path(in: CGRect(x: 4, y: 4, width: 14, height: 14))
-                    .fill(isSelected ? accent : settingsInactiveText)
-            }
-            .frame(width: 22, height: 22)
-            .contentShape(Rectangle())
+            // 실제 렌더와 같은 경로 생성기 — 설정에서 본 모양이 화면 모양과 같아야 한다.
+            DotMark(shape: choice)
+                .fill(fillColor)
+                .frame(width: Self.side, height: Self.side)
+                .overlay {
+                    DotMark(shape: choice)
+                        .strokeBorder(line, lineWidth: Self.lineWidth)
+                }
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .focusable(false)
