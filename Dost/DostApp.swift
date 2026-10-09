@@ -312,6 +312,7 @@ struct DostApp: App {
                 Button("Regenerate Auto Subtitles") {
                     NotificationCenter.default.post(name: .regenerateSubtitleRequested, object: nil)
                 }
+                .keyboardShortcut("r", modifiers: .command)
 
                 Divider()
 

@@ -687,6 +687,7 @@ struct ShortcutsSettingsView: View {
         .init(input: "Cmd + E", action: "Export dot image as PNG"),
         .init(input: "Shift + Cmd + E", action: "Export auto subtitles as .srt"),
         .init(input: "Cmd + X", action: "Clear data for this video (asks first)"),
+        .init(input: "Cmd + R", action: "Regenerate auto subtitles"),
         .init(input: "Cmd + W", action: "Close window"),
         .init(input: "Cmd + ,", action: "Open settings")
     ]
