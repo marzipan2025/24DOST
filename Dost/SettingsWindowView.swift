@@ -686,14 +686,15 @@ struct ShortcutsSettingsView: View {
         .init(input: "Cmd + P", action: "Open subtitle file"),
         .init(input: "Cmd + E", action: "Export dot image as PNG"),
         .init(input: "Shift + Cmd + E", action: "Export auto subtitles as .srt"),
+        .init(input: "Cmd + X", action: "Clear data for this video (asks first)"),
         .init(input: "Cmd + W", action: "Close window"),
         .init(input: "Cmd + ,", action: "Open settings")
     ]
 
     private let playbackKeyInputs: [ShortcutItem] = [
         .init(input: "Space", action: "Play, pause, or resume last media"),
-        .init(input: "Return", action: "Toggle fullscreen"),
-        .init(input: "Esc", action: "Leave fullscreen, or exit peek in Tap to Peek"),
+        .init(input: "Return", action: "Toggle fullscreen, or accept an on-screen prompt"),
+        .init(input: "Esc", action: "Leave fullscreen, exit peek in Tap to Peek, or dismiss an on-screen prompt"),
         .init(input: "Left / Right", action: "Seek backward or forward by 10 seconds"),
         .init(input: "Shift + Left / Right", action: "Open previous or next file"),
         .init(input: ", / .", action: "Move one timeline column left or right"),
@@ -706,7 +707,8 @@ struct ShortcutsSettingsView: View {
         .init(input: "T", action: "Toggle always on top"),
         .init(input: "P", action: "Cycle subtitles: off / external / embedded / auto-generated"),
         .init(input: "[ / ]", action: "Decrease or increase subtitle size"),
-        .init(input: "Cmd + 0", action: "Resize video window"),
+        .init(input: "Cmd + 0", action: "Resize video window, or fit content in fullscreen"),
+        .init(input: "Cmd + 1", action: "Fill the screen with content in fullscreen"),
         .init(input: "Cmd + - / =", action: "Zoom window out or in")
     ]
 
