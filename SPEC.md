@@ -425,6 +425,7 @@ Generate When No Subtitles Exist 가 켜져 있으면 곧바로 다시 만들기
 - 관절에 One Euro 떨림 거르개. 손을 0.3초 넘게 놓치면 새로 시작한다.
 - **표시는 도트로**(`DotsOverlayView.drawFingerDots`, 피크 중에도): 손끝에서 가장 가까운 보이는 도트 하나 — 검지만 찾음 = 흰색, 펴짐 = 액센트, 옮기는 중 = 그 도트 흰색 + 진행 방향 옆 도트 액센트로 깜빡(0.25초 간격), 빠르게 = 두 도트 모두 액센트이고 진행 방향 도트만 깜빡.
 - 켜짐은 `24dost.motionSensing`(기본 켜짐)에 저장. 키 M(전체화면), View ▸ Motion Sensing(체크), 설정 General 이 같은 값을 보고, 바뀌면 `MOTION SENSING ON/OFF` 를 1초 띄운다.
+- 카메라 권한을 한 번 거부하면 macOS 는 다시 묻지 않는다. 그래서 켤 때 거부(또는 제한) 상태면 `CAMERA ACCESS DENIED` 를 2초 띄우고 시스템 설정 ▸ 개인정보 보호 ▸ 카메라를 연다(`x-apple.systempreferences:com.apple.preference.security?Privacy_Camera`). 전체화면에 들어갈 때마다 열지는 않는다 — 사용자가 켜는 동작을 했을 때만.
 - 임시 서명이라 새 버전을 깔면 카메라 권한을 다시 묻는다(지정 요구사항이 cdhash).
 
 ---

@@ -2497,6 +2497,16 @@ struct ContentView: View {
         .onChange(of: motionSensing) { _, on in
             // 키(m)·메뉴·설정 어디서 바꿔도 여기로 온다
             applyMotionSensing()
+            // 카메라 권한을 한 번 거부하면 macOS 는 다시 묻지 않는다. 켤 때 거부 상태면 알리고
+            // 시스템 설정의 카메라 화면을 열어 준다(사용자가 거기서 24DOST 를 켜면 다음부터 동작).
+            let status = AVCaptureDevice.authorizationStatus(for: .video)
+            if on, status == .denied || status == .restricted {
+                showTransientAccentLabel("CAMERA ACCESS DENIED", seconds: 2.0)
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera") {
+                    NSWorkspace.shared.open(url)
+                }
+                return
+            }
             showTransientAccentLabel(on ? "MOTION SENSING ON" : "MOTION SENSING OFF", seconds: 1.0)
         }
         .onChange(of: tapToPeek) { _, enabled in
