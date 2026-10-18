@@ -35,11 +35,17 @@ enum TranscriberError: LocalizedError {
     }
 }
 
+/// 인식할 소리를 어디서 읽는지. mp4·mov 는 AVAsset, ffmpeg 엔진으로 트는 mkv·avi 등은 원본 파일을 직접 읽는다.
+enum AudioSource: @unchecked Sendable {
+    case asset(AVAsset)
+    case file(URL)
+}
+
 /// 오디오 구간 → 타임스탬프 붙은 텍스트. 백엔드 교체를 위해 프로토콜로 분리.
 /// (지금은 Apple SpeechAnalyzer 하나, 나중에 whisper.cpp를 같은 자리에 끼울 수 있다.)
 protocol SpeechTranscribing: Sendable {
     /// 지정 구간을 인식한다. 반환 시간은 에셋 기준 절대 초.
-    func transcribe(asset: AVAsset,
+    func transcribe(source: AudioSource,
                     timeRange: CMTimeRange,
                     locale: Locale) async throws -> [TranscriptSegment]
 
@@ -147,7 +153,7 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
 
     // MARK: 인식
 
-    func transcribe(asset: AVAsset,
+    func transcribe(source: AudioSource,
                     timeRange: CMTimeRange,
                     locale: Locale) async throws -> [TranscriptSegment] {
         try await prepare(locale: locale)
@@ -187,10 +193,18 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
 
         // 오디오를 읽어 흘려보낸다. 실패해도 continuation은 반드시 닫아야 collector가 끝난다.
         do {
-            try await Self.streamAudio(asset: asset,
-                                       timeRange: timeRange,
-                                       format: analyzerFormat,
-                                       into: continuation)
+            switch source {
+            case .asset(let asset):
+                try await Self.streamAudio(asset: asset,
+                                           timeRange: timeRange,
+                                           format: analyzerFormat,
+                                           into: continuation)
+            case .file(let url):
+                try Self.streamFileAudio(url: url,
+                                         timeRange: timeRange,
+                                         format: analyzerFormat,
+                                         into: continuation)
+            }
         } catch {
             continuation.finish()
             collector.cancel()
@@ -269,6 +283,38 @@ actor AppleSpeechTranscriber: SpeechTranscribing {
 
         if reader.status == .failed {
             throw TranscriberError.readerFailed(reader.error?.localizedDescription ?? "읽기 실패")
+        }
+    }
+
+    /// ffmpeg 엔진으로 트는 파일: 라이브러리로 구간을 풀어 analyzer 포맷의 PCM 버퍼로 밀어넣는다.
+    nonisolated private static func streamFileAudio(
+        url: URL,
+        timeRange: CMTimeRange,
+        format: AVAudioFormat,
+        into continuation: AsyncStream<AnalyzerInput>.Continuation
+    ) throws {
+        // AVAssetReader 경로와 같이 1채널 float32 로 받아, 필요하면 analyzer 포맷으로 바꾼다.
+        guard let readFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                             sampleRate: format.sampleRate,
+                                             channels: 1,
+                                             interleaved: false) else {
+            throw TranscriberError.readerFailed("PCM 포맷을 만들 수 없습니다.")
+        }
+        let converter = readFormat.isEqual(format) ? nil : AVAudioConverter(from: readFormat, to: format)
+        let start = timeRange.start.seconds
+        let end = start + timeRange.duration.seconds
+        try FFmpegAudioReader.read(url: url, start: start, end: end, sampleRate: format.sampleRate) { samples in
+            if Task.isCancelled { throw CancellationError() }
+            guard let pcm = AVAudioPCMBuffer(pcmFormat: readFormat, frameCapacity: AVAudioFrameCount(samples.count)),
+                  let channel = pcm.floatChannelData?[0] else { return }
+            pcm.frameLength = AVAudioFrameCount(samples.count)
+            samples.withUnsafeBufferPointer { channel.update(from: $0.baseAddress!, count: samples.count) }
+            if let converter {
+                guard let converted = convert(pcm, with: converter, to: format) else { return }
+                continuation.yield(AnalyzerInput(buffer: converted))
+            } else {
+                continuation.yield(AnalyzerInput(buffer: pcm))
+            }
         }
     }
 

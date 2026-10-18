@@ -14,6 +14,7 @@
 		C100002 /* SubtitleGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100012 /* SubtitleGenerator.swift */; };
 		C100003 /* Transcriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100013 /* Transcriber.swift */; };
 		F17A0001 /* FingerTilt.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17A0002 /* FingerTilt.swift */; };
+		FF0E0001 /* FFmpegEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF0E0002 /* FFmpegEngine.swift */; };
 		C100004 /* Translator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100014 /* Translator.swift */; };
 		A100001 /* DostApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100011 /* DostApp.swift */; };
 		A100002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100012 /* ContentView.swift */; };
@@ -35,6 +36,7 @@
 		C100012 /* SubtitleGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleGenerator.swift; sourceTree = "<group>"; };
 		C100013 /* Transcriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcriber.swift; sourceTree = "<group>"; };
 		F17A0002 /* FingerTilt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FingerTilt.swift; sourceTree = "<group>"; };
+		FF0E0002 /* FFmpegEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FFmpegEngine.swift; sourceTree = "<group>"; };
 		C100014 /* Translator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Translator.swift; sourceTree = "<group>"; };
 		A100010 /* Dost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A100011 /* DostApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DostApp.swift; sourceTree = "<group>"; };
@@ -81,6 +83,7 @@
 					C100012 /* SubtitleGenerator.swift */,
 					C100013 /* Transcriber.swift */,
 					F17A0002 /* FingerTilt.swift */,
+					FF0E0002 /* FFmpegEngine.swift */,
 					C100014 /* Translator.swift */,
 				A100023 /* OpenMediaURLIntent.swift */,
 				A100014 /* Assets.xcassets */,
@@ -197,6 +200,7 @@
 					C100002 /* SubtitleGenerator.swift in Sources */,
 					C100003 /* Transcriber.swift in Sources */,
 					F17A0001 /* FingerTilt.swift in Sources */,
+					FF0E0001 /* FFmpegEngine.swift in Sources */,
 					C100004 /* Translator.swift in Sources */,
 				A100022 /* OpenMediaURLIntent.swift in Sources */,
 			);
@@ -272,8 +276,12 @@
 		A100092 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Dost/Dost.entitlements;
+				HEADER_SEARCH_PATHS = /opt/homebrew/opt/ffmpeg/include;
+				LIBRARY_SEARCH_PATHS = /opt/homebrew/opt/ffmpeg/lib;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/CFFmpeg";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -295,8 +303,12 @@
 		A100093 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Dost/Dost.entitlements;
+				HEADER_SEARCH_PATHS = /opt/homebrew/opt/ffmpeg/include;
+				LIBRARY_SEARCH_PATHS = /opt/homebrew/opt/ffmpeg/lib;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/CFFmpeg";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;

@@ -103,7 +103,7 @@ final class SubtitleGenerator: ObservableObject {
     private(set) var isRunning = false
 
     /// 오디오를 읽을 대상이 준비돼 있는지.
-    var canGenerate: Bool { asset != nil && sourceURL != nil }
+    var canGenerate: Bool { audio != nil && sourceURL != nil }
 
     // MARK: 설정 (ContentView 가 UserDefaults 에서 읽어 넣어준다)
 
@@ -120,7 +120,8 @@ final class SubtitleGenerator: ObservableObject {
 
     // MARK: 내부 상태
 
-    private var asset: AVAsset?
+    /// 인식할 소리(AVAsset 또는 ffmpeg 엔진으로 트는 원본 파일)
+    private var audio: AudioSource?
     private var sourceURL: URL?
     private var mediaDuration: TimeInterval = 0
 
@@ -203,7 +204,7 @@ final class SubtitleGenerator: ObservableObject {
     // MARK: - 미디어 연결
 
     /// 새 미디어가 열릴 때 호출. 캐시가 있으면 통째로 복원한다.
-    func attach(sourceURL: URL?, asset: AVAsset?) {
+    func attach(sourceURL: URL?, audio: AudioSource?) {
         currentJob?.cancel()
         currentJob = nil
         cues = []
@@ -218,7 +219,7 @@ final class SubtitleGenerator: ObservableObject {
         mediaDuration = 0
         status = .idle
         self.sourceURL = sourceURL
-        self.asset = asset
+        self.audio = audio
 
         // 캐시된 자막이 있으면 복원 — 두 번째 재생은 즉시 뜬다.
         // 어떤 구간을 만들었는지도 함께 복원한다. 큐의 시각에서 역산하면 말이 없어서
@@ -233,7 +234,7 @@ final class SubtitleGenerator: ObservableObject {
         otherLanguageCache = cues.isEmpty ? findOtherLanguageCache() : nil
         // 인식 언어가 같은 캐시가 있으면 그 원문을 재사용 소스로 들고 간다.
         loadRecognitionSource()
-        DostLog.log("attach url=\(sourceURL?.lastPathComponent ?? "nil") asset=\(asset != nil) cached=\(cues.count) other=\(otherLanguageCache.map { "\($0.source)_\($0.target)" } ?? "none")")
+        DostLog.log("attach url=\(sourceURL?.lastPathComponent ?? "nil") audio=\(audio != nil) cached=\(cues.count) other=\(otherLanguageCache.map { "\($0.source)_\($0.target)" } ?? "none")")
     }
 
     func detach() {
@@ -246,7 +247,7 @@ final class SubtitleGenerator: ObservableObject {
         pendingRefine = []
         recognizedSegments = []
         recognizedCoverage = []
-        asset = nil
+        audio = nil
         sourceURL = nil
         mediaDuration = 0
         isRunning = false
@@ -396,7 +397,7 @@ final class SubtitleGenerator: ObservableObject {
         // 다른 언어 캐시 프롬프트가 떠 있으면 한 창도 만들지 않는다.
         // start() 에만 걸면 새지 않는다 — attach 보다 start 가 먼저 불리는 경로가 있어서,
         // 그때 isRunning 이 true 로 남아 이후 tick 에서 계속 돌아 버린다.
-        guard isRunning, otherLanguageCache == nil, currentJob == nil, let asset else { return }
+        guard isRunning, otherLanguageCache == nil, currentJob == nil, let audio else { return }
         let playhead = now ?? lastTickTime ?? 0
 
         // 재생 헤드 뒤가 다 찼으면 처음부터 다시 훑어 건너뛴 구간을 찾는다.
@@ -481,7 +482,7 @@ final class SubtitleGenerator: ObservableObject {
                     DostLog.log(String(format: "recognition reused: %d segments for %.1f-%.1fs",
                                        raw.count, windowStart, windowEnd))
                 } else {
-                    raw = try await self.transcriber.transcribe(asset: asset,
+                    raw = try await self.transcriber.transcribe(source: audio,
                                                                 timeRange: range,
                                                                 locale: locale)
                     DostLog.log(String(format: "transcribed %d segments for %.1f-%.1fs",
@@ -836,7 +837,7 @@ final class SubtitleGenerator: ObservableObject {
 
     /// 인식 언어가 같은 다른 캐시(도착어·엔진만 다른 것)에서 원문을 가져온다.
     ///
-    /// 인식기에는 도착어가 전달되지 않으므로(`transcribe(asset:timeRange:locale:)` 의
+    /// 인식기에는 도착어가 전달되지 않으므로(`transcribe(source:timeRange:locale:)` 의
     /// locale 은 출발어뿐) 같은 오디오·같은 출발어면 원문이 동일하다. 도착어를 바꿨다고
     /// 다시 듣는 건 순수한 낭비다 — 특히 인식은 권한이 걸리고 CPU·발열을 만드는 경로다.
     ///

@@ -121,6 +121,11 @@ done
 fix_homebrew_refs "$MACOS_DIR/ffmpeg" "@executable_path/../Frameworks"
 [ -f "$MACOS_DIR/ffprobe" ] && \
   fix_homebrew_refs "$MACOS_DIR/ffprobe" "@executable_path/../Frameworks"
+# 앱 실행 파일도 mkv·avi 를 직접 읽느라 ffmpeg 라이브러리(libavformat 등)를 링크한다
+fix_homebrew_refs "$MACOS_DIR/${APP_NAME}" "@executable_path/../Frameworks"
+if otool -L "$MACOS_DIR/${APP_NAME}" | grep -q /opt/homebrew; then
+  echo "Error: 앱 실행 파일에 Homebrew 경로가 남아 있습니다:"; otool -L "$MACOS_DIR/${APP_NAME}" | grep /opt/homebrew; exit 1
+fi
 
 # 각 dylib: 자체 ID 설정 + 내부 상호 참조 수정
 for src in "${DYLIB_SOURCES[@]}"; do

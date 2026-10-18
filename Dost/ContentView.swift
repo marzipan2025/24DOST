@@ -201,6 +201,70 @@ private struct SourceLanguageSync: ViewModifier {
     }
 }
 
+/// ffmpeg 엔진으로 트는 영상의 피크 화면. `PlayerLayerView` 와 같은 자리에서, 샘플러가 꺼낸 원본 프레임을
+/// 초당 30번 레이어에 바로 얹는다(IOSurface 를 그대로 쓰므로 복사가 없다). 피크 중에만 있다.
+struct FrameLayerView: NSViewRepresentable {
+    let sampler: VideoSampler
+    let isFullscreen: Bool
+
+    func makeNSView(context: Context) -> FrameLayerNSView {
+        let v = FrameLayerNSView()
+        v.source = { [weak sampler] in sampler?.latestPixelBuffer }
+        v.frameLayer.contentsGravity = isFullscreen ? .resizeAspect : .resizeAspectFill
+        return v
+    }
+
+    func updateNSView(_ nsView: FrameLayerNSView, context: Context) {
+        let gravity: CALayerContentsGravity = isFullscreen ? .resizeAspect : .resizeAspectFill
+        if nsView.frameLayer.contentsGravity != gravity { nsView.frameLayer.contentsGravity = gravity }
+    }
+}
+
+final class FrameLayerNSView: NSView {
+    let frameLayer = CALayer()
+    var source: (() -> CVPixelBuffer?)?
+    private var timer: Timer?
+    private var shown: CVPixelBuffer?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer = CALayer()
+        layer?.backgroundColor = NSColor.black.cgColor
+        layer?.addSublayer(frameLayer)
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        timer?.invalidate()
+        timer = nil
+        guard window != nil else { return }
+        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.refresh() }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+        refresh()
+    }
+
+    private func refresh() {
+        guard let buffer = source?(), buffer !== shown, let surface = CVPixelBufferGetIOSurface(buffer) else { return }
+        shown = buffer
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        frameLayer.contents = surface.takeUnretainedValue()
+        CATransaction.commit()
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        frameLayer.frame = bounds
+        CATransaction.commit()
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 // MARK: - Menu command observers
 //
 // ContentView.body 가 .onReceive 를 너무 많이 붙여 Swift 타입체커가 타임아웃하는 것을 방지하기
@@ -1532,8 +1596,8 @@ private struct DotsOverlayView: View {
     }
 
     private func playbackTimingLine() -> String {
-        let currentSeconds = max(0, sampler.previewPlayer?.currentTime().seconds ?? 0)
-        let durationSeconds = sampler.previewPlayer?.currentItem?.duration.seconds ?? 0
+        let currentSeconds = max(0, sampler.currentSeconds)
+        let durationSeconds = sampler.durationSeconds
         let hasDuration = durationSeconds.isFinite && durationSeconds > 0
         let totalString = hasDuration ? formatPlaybackTime(durationSeconds) : "--:--"
         return "\(formatPlaybackTime(currentSeconds)) / \(totalString)"
@@ -2033,7 +2097,7 @@ struct ContentView: View {
     }
 
     private var canPeek: Bool {
-        sampler.previewPlayer != nil
+        sampler.hasPlaybackMedia
             && sampler.videoSize != .zero
             && !sampler.isLoadingMedia
             && !sampler.isStaticContent
@@ -2045,7 +2109,7 @@ struct ContentView: View {
     /// 대기 상태: 앱 기동 후 아무것도 로드되지 않았거나 cleanup된 직후.
     /// 이미지 로드 중이나 영상 로드 중/완료 상태는 제외.
     private var isStandby: Bool {
-        sampler.previewPlayer == nil
+        !sampler.hasPlaybackMedia
             && !sampler.isStaticContent
             && !sampler.isLoadingMedia
     }
@@ -2078,7 +2142,7 @@ struct ContentView: View {
     }
 
     private var hasPlaybackInfoContent: Bool {
-        currentPlaybackInfoTitle?.isEmpty == false && sampler.previewPlayer != nil
+        currentPlaybackInfoTitle?.isEmpty == false && sampler.hasPlaybackMedia
     }
 
     // MARK: 마지막 재생 기억
@@ -2254,6 +2318,12 @@ struct ContentView: View {
             if isPeeking, let player = sampler.previewPlayer {
                 GeometryReader { geo in
                     peekVideoLayer(size: geo.size, player: player)
+                }
+                .allowsHitTesting(false)
+            } else if isPeeking, sampler.isUsingFrameEngine {
+                // ffmpeg 엔진으로 트는 영상(mkv·avi 등)은 AVPlayer 가 없어 원본 프레임을 직접 그린다
+                GeometryReader { geo in
+                    peekFrameLayer(size: geo.size)
                 }
                 .allowsHitTesting(false)
             }
@@ -2714,18 +2784,18 @@ struct ContentView: View {
 
     private func persistCurrentPlaybackPositionIfNeeded() {
         guard rememberPlaybackPosition, let key = currentPlaybackPositionKey else { return }
-        guard let player = sampler.previewPlayer else {
+        guard sampler.hasPlaybackMedia else {
             clearStoredPlaybackPosition(for: key)
             return
         }
 
-        let current = player.currentTime().seconds
+        let current = sampler.currentSeconds
         guard current.isFinite, current >= 1 else {
             clearStoredPlaybackPosition(for: key)
             return
         }
 
-        let duration = player.currentItem?.duration.seconds ?? 0
+        let duration = sampler.durationSeconds
         if duration.isFinite, duration > 0, current >= max(duration - 1, duration * 0.98) {
             clearStoredPlaybackPosition(for: key)
             return
@@ -2747,7 +2817,7 @@ struct ContentView: View {
         restorePlaybackPositionTask = Task {
             for _ in 0..<30 {
                 if Task.isCancelled { return }
-                if sampler.previewPlayer?.currentItem != nil {
+                if sampler.hasPlaybackMedia {
                     sampler.seek(toSeconds: savedSeconds)
                     return
                 }
@@ -2957,6 +3027,17 @@ struct ContentView: View {
     }
 
     // MARK: 피크 (우상단 도트 프레스 = 실제 영상 노출)
+
+    /// `peekVideoLayer` 와 같은 자리·크기로, AVPlayer 대신 ffmpeg 엔진의 원본 프레임을 그린다.
+    private func peekFrameLayer(size: CGSize) -> some View {
+        let layout = sampler.peekContentLayout(displaySize: size)
+        return FrameLayerView(sampler: sampler, isFullscreen: isFullscreen)
+            .frame(width:  layout?.size.width  ?? size.width,
+                   height: layout?.size.height ?? size.height)
+            .offset(x: layout?.offset.width ?? 0, y: layout?.offset.height ?? 0)
+            .frame(width: size.width, height: size.height)
+            .clipped()
+    }
 
     /// 피크 영상 컨테이너. 창 전체를 채운다. 모서리 곡률은 여기서 만들지 않는다 —
     /// 창 자체 마스크(`contentView.layer` cornerRadius 32 + masksToBounds)가 이미 자른다.
@@ -3625,7 +3706,8 @@ struct ContentView: View {
         let source = sanitizedFileName(currentSourceDisplayName())
         var timePart = ""
         if !sampler.isStaticContent,
-           let secs = sampler.previewPlayer?.currentTime().seconds,
+           sampler.hasPlaybackMedia,
+           case let secs = sampler.currentSeconds,
            secs.isFinite, secs >= 0 {
             timePart = " " + fileTimeStamp(secs)
         }
@@ -3879,7 +3961,7 @@ struct ContentView: View {
     /// 영상이 로드되지 않은 상태(대기/이미지)에서는 동작하지 않음.
     /// 자동 검출 프롬프트가 떠 있었다면 사용자 능동 선택으로 간주하고 dismiss.
     private func openSubtitleFile() {
-        guard sampler.previewPlayer != nil, !sampler.isStaticContent else { return }
+        guard sampler.hasPlaybackMedia, !sampler.isStaticContent else { return }
         subtitlePromptURL = nil
         let panel = NSOpenPanel()
         var types: [UTType] = []
