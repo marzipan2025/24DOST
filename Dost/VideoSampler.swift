@@ -220,6 +220,12 @@ class VideoSampler: ObservableObject {
     private var lastVolume: Float = 1.0
 
     private var activeRemuxTempURL: URL?
+    /// 돌고 있는 remux(ffmpeg). 다른 것을 열거나 닫으면 끊는다.
+    private var activeRemuxJob: RemuxJob?
+    /// 지금 열려 있거나 여는 중인 로컬 파일. 같은 파일을 또 놓으면 무시한다.
+    private var openedFileURL: URL?
+    /// 열 때마다 하나씩 올린다. 끝난 remux 가 지금 연 것이 아니면 결과를 버린다.
+    private var openGeneration: UInt64 = 0
     /// remux 전 원본 URL. 자막 캐시 키와 .srt 내보내기 경로에 쓴다
     /// (remux 임시 파일 경로를 쓰면 매번 캐시가 어긋난다).
     private(set) var currentSourceURL: URL?
@@ -325,6 +331,7 @@ class VideoSampler: ObservableObject {
     }
 
     init() {
+        Self.removeLeftoverRemuxFiles()
         let defaults = UserDefaults.standard
         var d = (defaults.object(forKey: Self.dotDiameterKey) as? Double).map { CGFloat($0) } ?? defaultDotDiameter
         var g = (defaults.object(forKey: Self.gridSizeKey)    as? Double).map { CGFloat($0) } ?? defaultGridSize
@@ -387,6 +394,9 @@ class VideoSampler: ObservableObject {
     /// 외부 진입점. AVFoundation이 지원 안 하는 컨테이너(mkv/webm/avi 등)는 ffmpeg로 remux 후 재생.
     /// 이미지 확장자면 정적 이미지 모드로 로드 (플레이 관련 기능은 비활성).
     func open(url: URL) {
+        // 열고 있거나 재생 중인 파일을 또 놓으면 무시한다(remux 를 처음부터 다시 하지 않는다)
+        if url.isFileURL, url == openedFileURL, isLoadingMedia || isPlaying { return }
+        openGeneration &+= 1
         startTimerIfNeeded()
         // 이미지 파일은 별도 경로로 처리
         if url.isFileURL && Self.isImageFile(url: url) {
@@ -395,20 +405,27 @@ class VideoSampler: ObservableObject {
         }
 
         cleanup()
-        // 기존 remux 임시 파일 제거
-        if let prev = activeRemuxTempURL {
-            try? FileManager.default.removeItem(at: prev)
-            activeRemuxTempURL = nil
-        }
+        // 돌던 remux 를 끊고 기존 임시 파일 제거
+        discardRemux()
         currentSourceURL = url
+
+        openedFileURL = url.isFileURL ? url : nil
 
         // 로컬 파일이고 AVFoundation이 지원 안 하는 확장자면 remux
         if url.isFileURL && Self.needsRemux(url: url) {
             isLoadingMedia = true
+            let job = RemuxJob()
+            activeRemuxJob = job
+            let generation = openGeneration
             Task.detached { [weak self] in
-                let outcome = await Self.remuxToMP4(source: url)
+                let outcome = await Self.remuxToMP4(source: url, job: job)
                 await MainActor.run { [weak self] in
-                    guard let self else { return }
+                    guard let self, self.openGeneration == generation else {
+                        // 그 사이 다른 것을 열었거나 닫았다: 다 만든 임시 파일은 버린다
+                        if case .success(let tempURL) = outcome { try? FileManager.default.removeItem(at: tempURL) }
+                        return
+                    }
+                    self.activeRemuxJob = nil
                     self.isLoadingMedia = false
                     switch outcome {
                     case .success(let tempURL):
@@ -832,10 +849,7 @@ class VideoSampler: ObservableObject {
     /// 정적 이미지 로드 — 한 번만 샘플링하고, 크기/간격 변경에 대응하도록 타이머만 유지.
     private func openImage(url: URL) {
         cleanup()
-        if let prev = activeRemuxTempURL {
-            try? FileManager.default.removeItem(at: prev)
-            activeRemuxTempURL = nil
-        }
+        discardRemux()
 
         guard let nsImage = NSImage(contentsOf: url),
               let cgImage = nsImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
@@ -905,11 +919,53 @@ class VideoSampler: ObservableObject {
         "rmvb", "rm", "ts", "m2ts", "mts", "vob", "asf", "divx", "xvid"
     ]
 
+    /// 돌던 remux 를 끊고 그 임시 파일을 지운다. 이전에 시작한 remux 의 결과도 버려진다.
+    private func discardRemux() {
+        openGeneration &+= 1
+        activeRemuxJob?.cancel()
+        activeRemuxJob = nil
+        if let prev = activeRemuxTempURL {
+            try? FileManager.default.removeItem(at: prev)
+            activeRemuxTempURL = nil
+        }
+    }
+
+    /// 지난번에 비정상 종료돼 남은 remux 임시 파일을 지운다(쌓이면 수십 GB 가 된다).
+    private static func removeLeftoverRemuxFiles() {
+        let tmp = FileManager.default.temporaryDirectory
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: tmp.path)) ?? [] where name.hasPrefix("dost-remux-") {
+            try? FileManager.default.removeItem(at: tmp.appendingPathComponent(name))
+        }
+    }
+
+    /// remux 한 번. 다른 것을 열거나 닫으면 `cancel` 로 돌고 있는 ffmpeg 을 끝낸다.
+    final class RemuxJob: @unchecked Sendable {
+        private let lock = NSLock()
+        private var process: Process?
+        private var cancelled = false
+
+        func cancel() {
+            lock.lock()
+            cancelled = true
+            let p = process
+            lock.unlock()
+            if let p, p.isRunning { p.terminate() }
+        }
+
+        /// 이미 취소됐으면 시작하지 않는다
+        func start(_ task: Process) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard !cancelled, (try? task.run()) != nil else { return false }
+            process = task
+            return true
+        }
+    }
+
     private static func needsRemux(url: URL) -> Bool {
         unsupportedExtensions.contains(url.pathExtension.lowercased())
     }
 
-    nonisolated private static func remuxToMP4(source: URL) async -> ResolveOutcome {
+    nonisolated private static func remuxToMP4(source: URL, job: RemuxJob) async -> ResolveOutcome {
         var candidates: [String] = []
         // 번들 내 임베드된 ffmpeg 우선 탐색
         if let bundled = Bundle.main.url(forAuxiliaryExecutable: "ffmpeg") {
@@ -924,8 +980,8 @@ class VideoSampler: ObservableObject {
             return .failure("ffmpeg이 설치되어 있지 않습니다.\n터미널에서 실행하세요:\n  brew install ffmpeg")
         }
 
-        let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("dost-remux-\(UUID().uuidString).mp4")
+        let tempBase = FileManager.default.temporaryDirectory
+            .appendingPathComponent("dost-remux-\(UUID().uuidString)")
 
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -937,6 +993,9 @@ class VideoSampler: ObservableObject {
                 let videoCodec = probeCodec(path: source.path, streamType: "v", ffmpegPath: ffmpegPath)
                 let audioCodec = probeCodec(path: source.path, streamType: "a", ffmpegPath: ffmpegPath)
                 let subtitleCodec = probeCodec(path: source.path, streamType: "s", ffmpegPath: ffmpegPath)
+                // MP3 는 MP4 에 넣으면 AVFoundation 이 소리 트랙을 못 알아봐 무음이 된다(avi 에 흔함).
+                // MOV 에 넣으면 복사만으로 들린다.
+                let tempURL = tempBase.appendingPathExtension(audioCodec == "mp3" ? "mov" : "mp4")
 
                 let mp4SafeVideo: Set<String> = ["h264", "hevc", "mpeg4", "mjpeg", "prores"]
                 let mp4SafeAudio: Set<String> = ["aac", "mp3", "ac3", "alac", "eac3"]
@@ -967,7 +1026,7 @@ class VideoSampler: ObservableObject {
                     return args
                 }
 
-                if runFFmpeg(path: ffmpegPath, args: baseArgs(subtitle: convertSubtitle)) {
+                if runFFmpeg(path: ffmpegPath, args: baseArgs(subtitle: convertSubtitle), job: job) {
                     continuation.resume(returning: .success(tempURL))
                     return
                 }
@@ -975,7 +1034,7 @@ class VideoSampler: ObservableObject {
                 // 자막 변환이 문제였을 수 있으므로, 여전히 stream copy 유지한 채 자막만 드롭 후 재시도
                 if convertSubtitle {
                     try? FileManager.default.removeItem(at: tempURL)
-                    if runFFmpeg(path: ffmpegPath, args: baseArgs(subtitle: false)) {
+                    if runFFmpeg(path: ffmpegPath, args: baseArgs(subtitle: false), job: job) {
                         continuation.resume(returning: .success(tempURL))
                         return
                     }
@@ -991,7 +1050,7 @@ class VideoSampler: ObservableObject {
                     tempURL.path
                 ]
 
-                if runFFmpeg(path: ffmpegPath, args: fallbackArgs) {
+                if runFFmpeg(path: ffmpegPath, args: fallbackArgs, job: job) {
                     continuation.resume(returning: .success(tempURL))
                     return
                 }
@@ -1036,19 +1095,16 @@ class VideoSampler: ObservableObject {
         }
     }
 
-    nonisolated private static func runFFmpeg(path: String, args: [String]) -> Bool {
+    nonisolated private static func runFFmpeg(path: String, args: [String], job: RemuxJob) -> Bool {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: path)
         task.arguments = args
-        task.standardOutput = Pipe()
-        task.standardError = Pipe()
-        do {
-            try task.run()
-            task.waitUntilExit()
-            return task.terminationStatus == 0
-        } catch {
-            return false
-        }
+        // 출력을 읽지 않는 파이프를 달면 버퍼가 차서 긴 remux 에서 ffmpeg 이 멈출 수 있다
+        task.standardOutput = FileHandle.nullDevice
+        task.standardError = FileHandle.nullDevice
+        guard job.start(task) else { return false }
+        task.waitUntilExit()
+        return task.terminationStatus == 0 && task.terminationReason == .exit
     }
 
     // MARK: - URL Open
@@ -1677,10 +1733,7 @@ class VideoSampler: ObservableObject {
 
     func resetAppState() {
         cleanup()
-        if let prev = activeRemuxTempURL {
-            try? FileManager.default.removeItem(at: prev)
-            activeRemuxTempURL = nil
-        }
+        discardRemux()
         urlLoadError = nil
         overlayEffect = .none
         overlayProgress = 0
