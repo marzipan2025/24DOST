@@ -4024,6 +4024,7 @@ struct ContentView: View {
     // MARK: 드래그&드롭
 
     /// 대기 상태든 재생 중이든 드롭을 수락. 재생 중 드롭은 현재 파일을 교체.
+    /// 자막 파일(.srt·.smi·.vtt)만 놓으면 재생 중인 영상에 그 자막을 입힌다.
     /// openFiles 내부에서 URL 편집 모드 해제까지 처리.
     private func performDrop(providers: [NSItemProvider]) -> Bool {
         guard !providers.isEmpty else { return false }
@@ -4046,7 +4047,22 @@ struct ContentView: View {
 
         group.notify(queue: .main) {
             guard !collected.isEmpty else { return }
-            openFiles(collected)
+            let subtitles = collected.filter { SubtitleFile.supportedExtensions.contains($0.pathExtension.lowercased()) }
+            let media = collected.filter { !SubtitleFile.supportedExtensions.contains($0.pathExtension.lowercased()) }
+            guard media.isEmpty else {
+                // 자막 파일은 재생 목록에 넣지 않는다(영상으로 열려다 빈 화면이 된다)
+                openFiles(media)
+                return
+            }
+            // 자막 파일만 놓았다: 재생 중인 영상에 그 자막을 입힌다(Shift+C 로 고른 것과 같다).
+            guard sampler.hasPlaybackMedia, !sampler.isStaticContent, let subtitle = subtitles.first else {
+                sampler.triggerBorderBlink()
+                return
+            }
+            subtitlePromptURL = nil
+            if !sampler.loadExternalSubtitle(url: subtitle) {
+                showTransientAccentLabel("SUBTITLE LOAD FAILED")
+            }
         }
         return true
     }
