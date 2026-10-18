@@ -325,6 +325,7 @@ struct GeneralSettingsView: View {
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     @AppStorage("tapToPeek") private var tapToPeek = false
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
+    @AppStorage(FingerTilt.enabledKey) private var motionSensing = true
     @AppStorage(DotShape.storageKey) private var dotShapeRaw = DotShape.defaultChoice.rawValue
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @State private var isResetConfirmationVisible = false
@@ -348,8 +349,11 @@ struct GeneralSettingsView: View {
                 SettingsRow("Auto-resize Window to Video") {
                     OnOffToggle(isOn: $autoResizeWindowToVideo)
                 }
-                SettingsRow("Prevent Display Sleep in Fullscreen", showDivider: false) {
+                SettingsRow("Prevent Display Sleep in Fullscreen") {
                     OnOffToggle(isOn: $preventFullscreenDisplaySleep)
+                }
+                SettingsRow("Motion Sensing in Fullscreen", showDivider: false) {
+                    OnOffToggle(isOn: $motionSensing)
                 }
             }
 
@@ -706,6 +710,7 @@ struct ShortcutsSettingsView: View {
         .init(input: "Z", action: "Reset dot size and spacing"),
         .init(input: "B", action: "Background style"),
         .init(input: "T", action: "Toggle always on top"),
+        .init(input: "M", action: "Toggle motion sensing (fullscreen only)"),
         .init(input: "P", action: "Cycle subtitles: off / external / embedded / auto-generated"),
         .init(input: "[ / ]", action: "Decrease or increase subtitle size"),
         .init(input: "Cmd + 0", action: "Resize video window, or fit content in fullscreen"),
@@ -726,7 +731,9 @@ struct ShortcutsSettingsView: View {
         .init(input: "Pinch", action: "Zoom content around the pointer"),
         .init(input: "Cmd + Drag", action: "Move the view while zoomed in"),
         .init(input: "Top-Left Dot", action: "Quit the app"),
-        .init(input: "Peek Dot", action: "Hold to peek, or tap-toggle when Tap to Peek is on")
+        .init(input: "Peek Dot", action: "Hold to peek, or tap-toggle when Tap to Peek is on"),
+        .init(input: "Tilt Index Finger", action: "Rewind or fast-forward 5 s per second in fullscreen (camera)"),
+        .init(input: "Index + Middle Finger", action: "Rewind or fast-forward 30 s per second while tilting")
     ]
 
     var body: some View {

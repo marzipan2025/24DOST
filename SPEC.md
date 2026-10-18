@@ -35,6 +35,7 @@ macOS 도트 매트릭스 영상 플레이어. 영상을 도트 격자로 렌더
 | `SubtitleModels.swift` | `SubtitleCue`, 등급 정의, .srt/.smi 파서 및 생성기 |
 | `SettingsWindowView.swift` | 설정 창 4개 탭, 소프트웨어 업데이터 |
 | `OpenMediaURLIntent.swift` | App Intents — 외부에서 URL 재생 요청 |
+| `FingerTilt.swift` | 전체화면 모션 감지 — 카메라로 검지 기울기를 읽어 끊김 없이 탐색(§7.5) |
 
 ### 2.1 창은 하나뿐이다 (중요)
 
@@ -385,6 +386,7 @@ Generate When No Subtitles Exist 가 켜져 있으면 곧바로 다시 만들기
 | Z | 도트 설정 초기화 |
 | B | 배경 스타일 순환 |
 | T | 항상 위 토글 (전체화면 아닐 때만) |
+| M | 모션 감지 토글 (전체화면에서만. 창 모드에서는 키를 삼킨다 — View 메뉴 단축키가 먹지 않게) |
 | P | 자막 순환 |
 | [ / ] | 자막 크기 |
 | ⌘0 | 영상 크기에 맞춰 창 조정. 전체화면에서는 콘텐츠 줌 fit |
@@ -410,14 +412,27 @@ Generate When No Subtitles Exist 가 켜져 있으면 곧바로 다시 만들기
 
 - 키 모니터는 `NSEvent.addLocalMonitorForEvents`. URL 편집 모드에서는 재생 단축키를 전부 무시하고 텍스트 입력만 받는다.
 - **한글 입력기 상태에서는 `charactersIgnoringModifiers`가 "ㅍ" 같은 타 언어 문자를 반환한다.** ⌘V는 하드웨어 키코드 9를 함께 검사해 어떤 환경에서도 붙여넣기가 되게 했다.
-- 자동 반복을 막아야 하는 키가 있다: `[49, 36, 76, 53, 17, 11, 35, 6]` (space, Return, Enter, Esc, T, B, P, Z).
+- 자동 반복을 막아야 하는 키가 있다: `[49, 36, 76, 53, 17, 11, 35, 6, 46]` (space, Return, Enter, Esc, T, B, P, Z, M).
+
+### 7.5 모션 감지 (전체화면, 카메라)
+
+33RUVI 0.2.9 의 검지 기울이기를 옮겼다(`FingerTilt.swift`). **전체화면이고 켜져 있을 때만** 카메라를 연다 — 전체화면 진입·종료(`didEnter/ExitFullScreen`)와 설정 변경에서 `applyMotionSensing()` 하나로 켜고 끈다.
+
+- 카메라 그림을 거울처럼 뒤집어 화면 가득(aspect fill) 맞췄다고 보고 검지 네 관절(뿌리·둘째 마디·첫째 마디·끝)을 찾는다. 가장 큰 가로 포맷을 쓴다 — 640×480 은 가운데만 잘라 낸 것이라 화각이 좁다.
+- **펴짐** = 둘째·첫째 마디에서 꺾인 각도의 합 ≤ 30°. "곧은 거리 ÷ 마디 길이 합" 은 고르게 60° 휘어도 94% 가 나와 쓰지 않는다(33RUVI 에서 확인).
+- **기울기** = 뿌리 → 끝 방향, 위가 0°. 펴진 채 30~150° 화면 왼쪽이면 뒤로, 오른쪽이면 앞으로, 끊김 없이 1초에 5초. 중지도 펴 있으면(굽힘 ≤ 30° 이고 끝이 둘째 마디보다 손목에서 1.15배 멀다) 1초에 30초.
+- 이동은 `VideoSampler.scrub(toSeconds:)` — 장면마다 부르되 앞선 seek 가 끝나야 다음을 보내고 그 사이 목표는 마지막 것만 남긴다(±0.1초 허용). 탐색 세로줄을 계속 띄운다.
+- 관절에 One Euro 떨림 거르개. 손을 0.3초 넘게 놓치면 새로 시작한다.
+- **표시는 도트로**(`DotsOverlayView.drawFingerDots`, 피크 중에도): 손끝에서 가장 가까운 보이는 도트 하나 — 검지만 찾음 = 흰색, 펴짐 = 액센트, 옮기는 중 = 그 도트 흰색 + 진행 방향 옆 도트 액센트로 깜빡(0.25초 간격), 빠르게 = 두 도트 모두 액센트이고 진행 방향 도트만 깜빡.
+- 켜짐은 `24dost.motionSensing`(기본 켜짐)에 저장. 키 M(전체화면), View ▸ Motion Sensing(체크), 설정 General 이 같은 값을 보고, 바뀌면 `MOTION SENSING ON/OFF` 를 1초 띄운다.
+- 임시 서명이라 새 버전을 깔면 카메라 권한을 다시 묻는다(지정 요구사항이 cdhash).
 
 ---
 
 ## 8. 설정
 
 ### General
-- Remember Playback Position / Playback Loop / Tap to Peek / Auto-resize Window to Video / Prevent Display Sleep in Fullscreen
+- Remember Playback Position / Playback Loop / Tap to Peek / Auto-resize Window to Video / Prevent Display Sleep in Fullscreen / Motion Sensing in Fullscreen
 - Accent Color
 - Software Update
 - **Clear Subtitle Cache** — 생성 자막만 삭제 (2단계 확인)
@@ -445,6 +460,7 @@ Generate When No Subtitles Exist 가 켜져 있으면 곧바로 다시 만들기
 | `24dost.accentColor`, `24dost.backgroundStyle`, `24dost.fullscreenBackgroundStyle` | 외형 |
 | `24dost.lastMedia.*` | kind, value, paths, title |
 | `24dost.recents.v1` | 최근 항목 (최대 10, LRU) |
+| `24dost.motionSensing` | 모션 감지 켜짐 (기본 true) |
 | `24dost.playbackPositions.v1` | 파일별 재생 위치 |
 | `dost.gridSize`, `dost.dotDiameter`, `dost.subtitleFontSize`, `dost.volume` | 렌더·재생 |
 | `adaptiveSubtitleColor`, `subtitleBackdropWhilePeeking`, `tapToPeek`, `rememberPlaybackPosition`, `loopMultiFilePlayback`, `preventFullscreenDisplaySleep`, `autoResizeWindowToVideo` | 토글 |

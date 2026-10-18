@@ -232,6 +232,8 @@ struct DostApp: App {
     @Environment(\.openWindow) private var openWindow
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var recents = RecentsStore()
+    /// 모션 감지(전체화면 카메라 검지 기울이기). 메뉴 체크 표시와 설정 General 이 같은 값을 본다.
+    @AppStorage(FingerTilt.enabledKey) private var motionSensing = true
 
     var body: some Scene {
         // 재생 창은 하나만 쓴다. 여분의 창은 AppDelegate 가 즉시 닫는다 (enforceSingle...).
@@ -376,6 +378,11 @@ struct DostApp: App {
                     NotificationCenter.default.post(name: .toggleAlwaysOnTop, object: nil)
                 }
                 .keyboardShortcut("t", modifiers: [])
+
+                // 체크 표시로 켜짐을 보인다. 단축키 m 은 표시용 — 키로는 전체화면에서만 먹고,
+                // 그 처리는 ContentView 의 키 모니터가 먼저 가로챈다(창 모드에선 삼킨다).
+                Toggle("Motion Sensing", isOn: $motionSensing)
+                    .keyboardShortcut("m", modifiers: [])
             }
 
             CommandGroup(after: .windowSize) {

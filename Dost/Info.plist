@@ -107,6 +107,8 @@
 	<true/>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSCameraUsageDescription</key>
+	<string>In fullscreen, tilt your index finger to rewind or fast-forward. Camera frames are never saved.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>24DOST transcribes the audio of the video you are watching, on your Mac, to generate translated subtitles. Audio is not sent anywhere.</string>
 </dict>

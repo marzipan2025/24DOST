@@ -13,6 +13,7 @@
 		C100001 /* SubtitleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100011 /* SubtitleModels.swift */; };
 		C100002 /* SubtitleGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100012 /* SubtitleGenerator.swift */; };
 		C100003 /* Transcriber.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100013 /* Transcriber.swift */; };
+		F17A0001 /* FingerTilt.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17A0002 /* FingerTilt.swift */; };
 		C100004 /* Translator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C100014 /* Translator.swift */; };
 		A100001 /* DostApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100011 /* DostApp.swift */; };
 		A100002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100012 /* ContentView.swift */; };
@@ -33,6 +34,7 @@
 		C100011 /* SubtitleModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleModels.swift; sourceTree = "<group>"; };
 		C100012 /* SubtitleGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubtitleGenerator.swift; sourceTree = "<group>"; };
 		C100013 /* Transcriber.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Transcriber.swift; sourceTree = "<group>"; };
+		F17A0002 /* FingerTilt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FingerTilt.swift; sourceTree = "<group>"; };
 		C100014 /* Translator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Translator.swift; sourceTree = "<group>"; };
 		A100010 /* Dost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A100011 /* DostApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DostApp.swift; sourceTree = "<group>"; };
@@ -78,6 +80,7 @@
 					C100011 /* SubtitleModels.swift */,
 					C100012 /* SubtitleGenerator.swift */,
 					C100013 /* Transcriber.swift */,
+					F17A0002 /* FingerTilt.swift */,
 					C100014 /* Translator.swift */,
 				A100023 /* OpenMediaURLIntent.swift */,
 				A100014 /* Assets.xcassets */,
@@ -193,6 +196,7 @@
 					C100001 /* SubtitleModels.swift in Sources */,
 					C100002 /* SubtitleGenerator.swift in Sources */,
 					C100003 /* Transcriber.swift in Sources */,
+					F17A0001 /* FingerTilt.swift in Sources */,
 					C100004 /* Translator.swift in Sources */,
 				A100022 /* OpenMediaURLIntent.swift in Sources */,
 			);
@@ -279,7 +283,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.4;
+				MARKETING_VERSION = 0.1.5;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dost.app;
 				PRODUCT_NAME = "24DOST";
@@ -302,7 +306,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.1.4;
+				MARKETING_VERSION = 0.1.5;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.dost.app;
 				PRODUCT_NAME = "24DOST";

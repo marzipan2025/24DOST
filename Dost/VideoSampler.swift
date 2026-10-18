@@ -1095,6 +1095,43 @@ class VideoSampler: ObservableObject {
         startTimerIfNeeded()
     }
 
+    // MARK: - 모션 감지(FingerTilt)가 쓰는 끊김 없는 이동
+
+    var currentSeconds: Double {
+        let t = player?.currentTime().seconds ?? 0
+        return t.isFinite ? t : 0
+    }
+    var durationSeconds: Double {
+        let d = player?.currentItem?.duration.seconds ?? 0
+        return d.isFinite ? d : 0
+    }
+
+    /// 끊김 없이 옮기기. 장면마다 불리므로 앞선 이동이 끝나야 다음 이동을 보내고,
+    /// 그 사이에 온 목표는 마지막 것만 남긴다. 조금 덜 정확하게(±0.1초) 찾아 빨리 따라온다.
+    /// 탐색 세로줄은 부를 때마다 다시 띄워 옮기는 동안 계속 보인다.
+    private var scrubbing = false
+    private var scrubTarget: Double?
+    func scrub(toSeconds seconds: Double) {
+        guard let player else { return }
+        let d = durationSeconds
+        guard d > 0 else { return }
+        let target = min(max(0, seconds), max(0, d - 0.25))
+        startTimerIfNeeded()
+        showOverlay(.col(seekCol(fraction: target / d)), blinks: 1)
+        if scrubbing { scrubTarget = target; return }
+        scrubbing = true
+        noteSeek(to: target)
+        let tolerance = CMTime(seconds: 0.1, preferredTimescale: 600)
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
+                    toleranceBefore: tolerance, toleranceAfter: tolerance) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.scrubbing = false
+                if let next = self.scrubTarget { self.scrubTarget = nil; self.scrub(toSeconds: next) }
+            }
+        }
+    }
+
     func togglePlayPause() {
         guard let player else { return }
         if isPlaying { player.pause() } else { player.play() }

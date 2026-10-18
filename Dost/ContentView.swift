@@ -967,6 +967,8 @@ private struct DotsOverlayView: View {
     let accentColor: Color
     /// 새 릴리스가 있으면 그 버전 문자열. 대기 화면 "24Dost"가 업데이트 표기로 바뀐다.
     let updateAvailableVersion: String?
+    /// 전체화면 모션 감지(검지 기울이기)의 손끝. 카메라 장면마다(초당 약 30번) 바뀌어 다시 그린다.
+    @ObservedObject var finger = FingerTilt.shared
 
     var body: some View {
         Canvas { context, size in
@@ -983,6 +985,54 @@ private struct DotsOverlayView: View {
     }
 
     // MARK: Draw
+
+    /// 모션 감지 손끝 표시(전체화면에서만, 피크 중에도). 손끝에서 가장 가까운 보이는 도트 하나를 켠다.
+    /// - 검지만 찾음: 흰 도트
+    /// - 검지 폄: 액센트 도트
+    /// - 옮기는 중: 그 도트는 흰색, 진행 방향 옆 도트가 액센트로 깜빡인다(0.25초 간격)
+    /// - 빠르게(중지까지 폄): 두 도트 모두 액센트, 진행 방향 도트만 깜빡인다
+    private func drawFingerDots(context: inout GraphicsContext, size: CGSize, layout: DotGridLayout,
+                                dotD: CGFloat, seam: CGFloat) {
+        guard isFullscreen, let tip = finger.tip else { return }
+        let p = CGPoint(x: tip.x * size.width, y: tip.y * size.height)
+        let grid = layout.grid
+        let r0 = Int(((p.y - layout.offsetY) / grid).rounded(.down))
+        let c0 = Int(((p.x - layout.offsetX) / grid).rounded(.down))
+        // 가장 가까운 보이는 도트(손끝이 격자 밖이면 가장자리 줄로 붙인다)
+        let rowRange = 1...(layout.totalRows - 2), colRange = 1...(layout.totalCols - 2)
+        var best: (row: Int, col: Int)?
+        var bestD = CGFloat.greatestFiniteMagnitude
+        for r in (r0 - 1)...(r0 + 1) {
+            for c in (c0 - 1)...(c0 + 1) {
+                let rr = min(max(r, rowRange.lowerBound), rowRange.upperBound)
+                let cc = min(max(c, colRange.lowerBound), colRange.upperBound)
+                let ct = layout.center(row: rr, col: cc)
+                if layout.isCornerMasked(ct.x, ct.y) { continue }
+                let d = hypot(ct.x - p.x, ct.y - p.y)
+                if d < bestD { bestD = d; best = (rr, cc) }
+            }
+        }
+        guard let b = best else { return }
+        func fill(_ row: Int, _ col: Int, _ color: Color) {
+            let ct = layout.center(row: row, col: col)
+            if layout.isCornerMasked(ct.x, ct.y) { return }
+            let rect = CGRect(x: ct.x - layout.half, y: ct.y - layout.half, width: dotD, height: dotD)
+                .insetBy(dx: -seam, dy: -seam)
+            context.fill(dotShape.path(in: rect), with: .color(color))
+        }
+        switch finger.marker {
+        case .found:
+            fill(b.row, b.col, .white)
+        case .straight:
+            fill(b.row, b.col, accentColor)
+        case .moving(let dir, let fast):
+            // 빠르게(중지까지 폄)는 손끝 도트도 액센트 — 두 점 모두 액센트이고 진행 방향 도트만 깜빡인다
+            fill(b.row, b.col, fast ? accentColor : .white)
+            let next = b.col + dir
+            let blinkOn = Int(CACurrentMediaTime() / 0.25) % 2 == 0
+            if colRange.contains(next), blinkOn { fill(b.row, next, accentColor) }
+        }
+    }
 
     /// 플레이스홀더: 첫 프레임 샘플링 전(= dotColors 비어있음)까지 유지.
     /// 단 remux(로딩) 중에는 모든 placeholder 요소를 숨겨 인디케이터가 단독으로 보이게.
@@ -1186,6 +1236,8 @@ private struct DotsOverlayView: View {
                 context.fill(dotShape.path(in: dotRect), with: .color(color))
             }
         }
+
+        drawFingerDots(context: &context, size: size, layout: layout, dotD: dotD, seam: seam)
 
         // 오버레이 텍스트 색상
         // 풀스크린: BLACK 모드에서만 밝은 텍스트, WHITE 모드는 어두운 텍스트로 반전.
@@ -1833,6 +1885,8 @@ struct ContentView: View {
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     @AppStorage("tapToPeek") private var tapToPeek = false
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
+    /// 모션 감지(전체화면 카메라 검지 기울이기). 다음 실행에도 마지막 설정을 따른다.
+    @AppStorage(FingerTilt.enabledKey) private var motionSensing = true
     @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = false
     @AppStorage("autoResizeWindowToVideo") private var autoResizeWindowToVideo = true
     @AppStorage("adaptiveSubtitleColor") private var adaptiveSubtitleColor = true
@@ -2440,6 +2494,11 @@ struct ContentView: View {
             }
         }
         .onChange(of: preventFullscreenDisplaySleep) { _, _ in updateSleepPrevention() }
+        .onChange(of: motionSensing) { _, on in
+            // 키(m)·메뉴·설정 어디서 바꿔도 여기로 온다
+            applyMotionSensing()
+            showTransientAccentLabel(on ? "MOTION SENSING ON" : "MOTION SENSING OFF", seconds: 1.0)
+        }
         .onChange(of: tapToPeek) { _, enabled in
             if !enabled { endPeekIfNeeded() }
         }
@@ -2466,6 +2525,7 @@ struct ContentView: View {
             sampler.isFullscreen = true
             cursorHider.start()
             sampler.backgroundDotAlpha = (fullscreenBackgroundStyle == .black) ? 0.10 : 0.40
+            applyMotionSensing()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
             // 롤아웃 모드에서만 끝낸다. 그쪽은 "커서가 도트를 벗어나면 종료"인데 다른 앱으로
@@ -2481,6 +2541,7 @@ struct ContentView: View {
             isFullscreen = false
             sampler.isFullscreen = false
             cursorHider.stop()
+            applyMotionSensing()   // 카메라는 전체화면 동안만
             // 전체화면을 나오면 피크도 끝낸다 — 도트로 돌아가며 멈춘다(peekEnd 가 항상 pause).
             // Esc 키가 아니라 여기에 거는 이유: Return·더블클릭·초록 버튼으로 나갈 때도
             // 같아야 한다. 키에만 걸면 나가는 경로마다 결과가 달라진다.
@@ -3348,8 +3409,8 @@ struct ContentView: View {
         }
     }
 
-    /// space, ↵, Esc, t, b, p, z — 한 번 눌렀을 때 한 번만 실행돼야 하는 키들.
-    private static let nonRepeatingKeyCodes: Set<UInt16> = [49, 36, 76, 53, 17, 11, 35, 6]
+    /// space, ↵, Esc, t, b, p, z, m — 한 번 눌렀을 때 한 번만 실행돼야 하는 키들.
+    private static let nonRepeatingKeyCodes: Set<UInt16> = [49, 36, 76, 53, 17, 11, 35, 6, 46]
 
     /// 평시(재생) 모드 키 처리.
     private func handlePlaybackKey(_ event: NSEvent) -> NSEvent? {
@@ -3450,6 +3511,11 @@ struct ContentView: View {
         case 11:       cycleBackgroundStyle();        return nil            // b
         case 35:                                                             // p
             toggleSubtitlesWithLabel(); return nil                           // p   캡션 온/오프
+        case 46:                                                             // m   모션 감지
+            // 전체화면에서만 켜고 끈다. 창 모드에서도 삼키는 건 View 메뉴의 같은 단축키가
+            // 창 모드에서 토글되지 않게 하려는 것이다(메뉴를 눌러 바꾸는 건 어디서든 된다).
+            if isFullscreen { motionSensing.toggle() }
+            return nil
         case 33:       sampler.decreaseSubtitleSize(); return nil           // [
         case 30:       sampler.increaseSubtitleSize(); return nil           // ]
         default:
@@ -3776,6 +3842,16 @@ struct ContentView: View {
             let next = backgroundStyle.next
             backgroundStyleRaw = next.rawValue
             showTransientAccentLabel(next.displayName)
+        }
+    }
+
+    /// 모션 감지 카메라: 전체화면이고 켜져 있을 때만 돈다.
+    private func applyMotionSensing() {
+        if isFullscreen && motionSensing {
+            let size = hostWindow?.screen?.frame.size ?? sampler.currentDisplaySize
+            FingerTilt.shared.start(screenSize: size, sampler: sampler)
+        } else {
+            FingerTilt.shared.stop()
         }
     }
 
