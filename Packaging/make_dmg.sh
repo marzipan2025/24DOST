@@ -17,26 +17,25 @@ OUTPUT_BASENAME="${OUTPUT_BASENAME%.dmg}"
 OUTPUT="${SCRIPT_DIR}/../Releases/${VERSION}/${OUTPUT_BASENAME}.dmg"
 BG_IMG="${SCRIPT_DIR}/24DOST_wallpaper.png"
 
-# dylib 소스 경로 목록 (cp가 심링크를 자동으로 역참조함)
-DYLIB_SOURCES=(
-  "/opt/homebrew/opt/ffmpeg/lib/libavdevice.62.dylib"
-  "/opt/homebrew/opt/ffmpeg/lib/libavfilter.11.dylib"
-  "/opt/homebrew/opt/ffmpeg/lib/libavformat.62.dylib"
-  "/opt/homebrew/opt/ffmpeg/lib/libavcodec.62.dylib"
-  "/opt/homebrew/opt/ffmpeg/lib/libswresample.6.dylib"
-  "/opt/homebrew/opt/ffmpeg/lib/libswscale.9.dylib"
-  "/opt/homebrew/opt/ffmpeg/lib/libavutil.60.dylib"
-  "/opt/homebrew/opt/libvmaf/lib/libvmaf.3.dylib"
-  "/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib"
-  "/opt/homebrew/opt/openssl@3/lib/libcrypto.3.dylib"
-  "/opt/homebrew/opt/libvpx/lib/libvpx.12.dylib"
-  "/opt/homebrew/opt/dav1d/lib/libdav1d.7.dylib"
-  "/opt/homebrew/opt/lame/lib/libmp3lame.0.dylib"
-  "/opt/homebrew/opt/opus/lib/libopus.0.dylib"
-  "/opt/homebrew/opt/svt-av1/lib/libSvtAv1Enc.4.dylib"
-  "/opt/homebrew/opt/x264/lib/libx264.165.dylib"
-  "/opt/homebrew/opt/x265/lib/libx265.216.dylib"
-)
+# 실행 파일들이 쓰는 Homebrew dylib 을 otool 로 따라가며 모아 DYLIB_SOURCES 에 담는다.
+# 예전엔 경로를 손으로 적어 뒀는데, brew 가 ffmpeg·openssl 등을 올리면(libavcodec.62→63 등)
+# 파일 이름이 바뀌어 맥마다 깨졌다. 중복은 파일 이름(basename)으로 거른다.
+# $@: 뿌리가 되는 실행 파일들
+collect_homebrew_dylibs() {
+  DYLIB_SOURCES=()
+  local todo=("$@") seen=" " f dep base
+  while [ ${#todo[@]} -gt 0 ]; do
+    f="${todo[0]}"; todo=("${todo[@]:1}")
+    while IFS= read -r dep; do
+      [ -z "$dep" ] && continue
+      base=$(basename "$dep")
+      case "$seen" in *" $base "*) continue;; esac
+      seen="${seen}${base} "
+      DYLIB_SOURCES+=("$dep")
+      todo+=("$dep")
+    done < <(otool -L "$f" 2>/dev/null | tail -n +2 | awk '{print $1}' | grep '^/opt/homebrew')
+  done
+}
 
 # Homebrew 경로를 번들 내부 경로로 교체
 # $1: 파일 경로  $2: rpath 접두사 (@executable_path/../Frameworks 또는 @loader_path)
@@ -110,6 +109,10 @@ if [ -x "/opt/homebrew/opt/ffmpeg/bin/ffprobe" ]; then
   chmod +x "$MACOS_DIR/ffprobe"
 fi
 
+# 들어갈 dylib 목록을 지금 이 맥의 Homebrew 에서 구한다
+collect_homebrew_dylibs "/opt/homebrew/opt/ffmpeg/bin/ffmpeg" "/opt/homebrew/opt/ffmpeg/bin/ffprobe" "${APP_SRC}/Contents/MacOS/${APP_NAME}"
+echo "    dylib ${#DYLIB_SOURCES[@]}개"
+
 # dylib 복사
 for src in "${DYLIB_SOURCES[@]}"; do
   base=$(basename "$src")
@@ -133,6 +136,14 @@ for src in "${DYLIB_SOURCES[@]}"; do
   target="$FW_DIR/$base"
   install_name_tool -id "@loader_path/$base" "$target" 2>/dev/null || true
   fix_homebrew_refs "$target" "@loader_path"
+done
+
+# 번들 안 dylib 에 Homebrew 경로가 하나라도 남으면 다른 맥에서 못 연다 — 여기서 멈춘다
+for f in "$FW_DIR"/*.dylib "$MACOS_DIR/ffmpeg" "$MACOS_DIR/ffprobe"; do
+  [ -f "$f" ] || continue
+  if otool -L "$f" | tail -n +2 | grep -q /opt/homebrew; then
+    echo "Error: $(basename "$f") 에 Homebrew 경로가 남아 있습니다:"; otool -L "$f" | grep /opt/homebrew; exit 1
+  fi
 done
 
 # 애드혹 코드 서명 (dylib → helper → 앱 번들 순)
