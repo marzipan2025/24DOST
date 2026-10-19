@@ -302,18 +302,27 @@ private let indicatorColorPlay  = Color.white                                   
 
 /// 도트 격자를 그릴 도형.
 ///
-/// **크기는 세 모양이 공유한다** — `dotDiameter` 가 원의 지름이자 사각형의 한 변이고,
+/// **크기는 모든 모양이 공유한다** — `dotDiameter` 가 원의 지름이자 사각형의 한 변, 3:2 직사각형의 긴 변이고,
 /// 별의 뿔 끝을 잇는 원의 지름이다. 같은 설정값이 모양에 따라 다른 크기를 뜻하면
 /// W/S 로 맞춰 둔 화면이 전환할 때마다 어긋난다. 사각형이 원보다 넓이가 4/π(약 27%)
 /// 커 보이고 별이 그보다 작아 보이는 건 의도된 결과다.
 ///
-/// **순서가 곧 설정 화면의 순서다**(`allCases`) — 원, 사각형, 별.
+/// **순서가 곧 설정 화면의 순서다**(`allCases`) — 원, 사각형, 3:2 직사각형, 별.
 enum DotShape: String, CaseIterable, Identifiable {
     static let storageKey = "24dost.dotShape"
     static let defaultChoice: DotShape = .circle
 
+    /// 격자의 별·사각형을 칸마다 다른 각도로 돌릴지. 원은 돌려도 같아서 해당이 없다.
+    static let randomRotationKey = "24dost.dotRandomRotation"
+    static let randomRotationDefault = true
+
+    /// 회전이 모양을 바꾸는지 — 설정에서 랜덤 회전 항목을 켤 수 있는지가 여기 달렸다.
+    var supportsRotation: Bool { self != .circle }
+
     case circle
     case square
+    /// 가로 3 : 세로 2 직사각형. 긴 변이 `dotDiameter` 라 정사각형보다 납작할 뿐 넓지 않다.
+    case rectangle
     case star
 
     var id: String { rawValue }
@@ -322,6 +331,7 @@ enum DotShape: String, CaseIterable, Identifiable {
         switch self {
         case .circle: return "Circle"
         case .square: return "Square"
+        case .rectangle: return "Rectangle"
         case .star: return "Star"
         }
     }
@@ -337,7 +347,8 @@ enum DotShape: String, CaseIterable, Identifiable {
     /// 비친다.** 살짝 키워 겹쳐 그리면 사라진다. 원은 접점에서만 닿아 해당이 없고,
     /// 간격이 1 이상 남아 있으면 겹칠 일이 없으므로 0 이다.
     func seamOutset(gridSize: CGFloat, dotDiameter: CGFloat) -> CGFloat {
-        guard self == .square, gridSize - dotDiameter <= 0 else { return 0 }
+        // 3:2 직사각형도 가로로는 정사각형처럼 맞붙는다.
+        guard self == .square || self == .rectangle, gridSize - dotDiameter <= 0 else { return 0 }
         return 0.5
     }
 
@@ -347,8 +358,70 @@ enum DotShape: String, CaseIterable, Identifiable {
         switch self {
         case .circle: return Path(ellipseIn: rect)
         case .square: return Path(rect)     // 라운딩 없음 — 원과 대비가 분명해야 한다
-        case .star:   return Self.starPath(in: rect)
+        case .rectangle: return Self.rectanglePath(in: rect, rotation: 0)
+        case .star:   return Self.starPath(in: rect, rotation: Self.starRotation)
         }
+    }
+
+    /// 격자의 `(row, col)` 칸에 놓일 도트. `randomRotation` 이 켜져 있으면 별·사각형이
+    /// 칸마다 다른 각도로 돌고, 꺼져 있거나 원이면 `path(in:)` 과 같다.
+    ///
+    /// 각도는 칸 번호에서 **결정적으로** 뽑는다 — Canvas 는 매 프레임 다시 그리므로
+    /// 그때마다 난수를 뽑으면 별이 바르르 떤다. 같은 칸은 늘 같은 각도라 화면·손끝
+    /// 도트·PNG 내보내기가 서로 어긋나지도 않는다.
+    ///
+    /// - Parameter yUp: 좌하단 원점(CGContext) 좌표에 그릴 때 true. 위아래가 뒤집힌
+    ///   좌표에서 같은 각을 쓰면 별이 거울상으로 돌아가 화면과 달라진다.
+    func path(in rect: CGRect, row: Int, col: Int,
+              randomRotation: Bool, yUp: Bool = false) -> Path {
+        guard randomRotation else { return path(in: rect) }
+        let unit = Self.cellUnit(row: row, col: col)
+        switch self {
+        case .circle:
+            return path(in: rect)
+        case .square:
+            // 사각형은 90° 마다 제 모양으로 돌아온다. 한 변은 그대로라 돌린 모서리는
+            // 틀(rect) 밖으로 최대 √2 배까지 나간다 — 크기를 원·별과 맞추는 쪽을 택했다.
+            let a = unit * .pi / 2
+            return Self.boxPath(in: rect, aspect: 1, rotation: yUp ? -a : a)
+        case .rectangle:
+            // 직사각형은 180° 마다 제 모양으로 돌아온다.
+            let a = unit * .pi
+            return Self.rectanglePath(in: rect, rotation: yUp ? -a : a)
+        case .star:
+            return Self.starPath(in: rect, rotation: unit * 2 * Self.starHalfStep, yUp: yUp)
+        }
+    }
+
+    /// 칸 번호 → [0, 1). 정수 해시(splitmix64 끝단)로 섞어 이웃 칸끼리 비슷해지지 않게 한다.
+    private static func cellUnit(row: Int, col: Int) -> CGFloat {
+        var z = (UInt64(bitPattern: Int64(row)) &* 0x9E37_79B9_7F4A_7C15)
+            ^ (UInt64(bitPattern: Int64(col)) &* 0xC2B2_AE3D_27D4_EB4F)
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        z ^= z >> 31
+        return CGFloat(z >> 11) / CGFloat(UInt64(1) << 53)
+    }
+
+    /// 가로 3 : 세로 2 직사각형.
+    private static func rectanglePath(in rect: CGRect, rotation: CGFloat) -> Path {
+        boxPath(in: rect, aspect: 2.0 / 3.0, rotation: rotation)
+    }
+
+    /// 중심을 축으로 `rotation` 만큼 돌린 직사각형. 가로는 `rect` 의 짧은 변,
+    /// 세로는 그 `aspect` 배다(1 이면 정사각형).
+    private static func boxPath(in rect: CGRect, aspect: CGFloat, rotation: CGFloat) -> Path {
+        let w = min(rect.width, rect.height) / 2
+        let h = w * aspect
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let c = cos(rotation), s = sin(rotation)
+        let corners = [(-w, -h), (w, -h), (w, h), (-w, h)].map { x, y in
+            CGPoint(x: center.x + x * c - y * s, y: center.y + x * s + y * c)
+        }
+        var path = Path()
+        path.addLines(corners)
+        path.closeSubpath()
+        return path
     }
 
     // MARK: 별
@@ -375,15 +448,17 @@ enum DotShape: String, CaseIterable, Identifiable {
     )
 
     /// 반시계 10°. y 가 아래로 증가하는 좌표계라 각을 **빼면** 반시계로 돈다.
+    /// 격자 밖(설정 스와치, 로딩 인디케이터)의 별은 이 고정 각을 쓴다.
     private static let starRotation: CGFloat = -10 * .pi / 180
 
     /// 뿔 끝이 바깥 원에 닿는 오각별. 바깥 반지름은 원의 반지름과 같다.
-    private static func starPath(in rect: CGRect) -> Path {
+    private static func starPath(in rect: CGRect, rotation: CGFloat, yUp: Bool = false) -> Path {
         let outerR = min(rect.width, rect.height) / 2
         let innerR = outerR * starRadiusRatio
         let center = CGPoint(x: rect.midX, y: rect.midY)
-        // 회전이 없으면 첫 뿔이 12시(-90°)를 향한다.
-        let start = -CGFloat.pi / 2 + starRotation
+        // 회전이 없으면 첫 뿔이 12시(-90°)를 향한다. y 가 위로 자라는 좌표에선
+        // 12시가 +90° 이고, 같은 쪽으로 돌려 보이려면 각의 부호도 뒤집어야 한다.
+        let start = yUp ? CGFloat.pi / 2 - rotation : -CGFloat.pi / 2 + rotation
 
         var path = Path()
         for i in 0..<5 {
@@ -408,7 +483,7 @@ enum DotShape: String, CaseIterable, Identifiable {
     /// 별만 22pt 틀을 뚫고 나가 옆 스와치와 크기가 어긋난다.
     var strokeInsetScale: CGFloat {
         switch self {
-        case .circle, .square: return 1
+        case .circle, .square, .rectangle: return 1
         case .star: return 1 / sin(Self.starTipAngle / 2)
         }
     }
@@ -427,7 +502,7 @@ enum DotShape: String, CaseIterable, Identifiable {
         case .circle: return oneLineHeight / 2
         // 별을 자막 뒤에 깔 수는 없으니 각진 쪽에 붙인다 — 뿔이 선 도형이라
         // 알약보다 각진 사각형이 가깝다.
-        case .square, .star: return 0
+        case .square, .rectangle, .star: return 0
         }
     }
 }
@@ -1010,6 +1085,8 @@ private struct DotsOverlayView: View {
     let adaptiveSubtitleColor: Bool
     /// 도트를 원으로 그릴지 사각형으로 그릴지. (설정 Appearance)
     let dotShape: DotShape
+    /// 별·사각형 도트를 칸마다 랜덤한 각도로 돌릴지. (설정 Appearance)
+    let dotRandomRotation: Bool
     /// peek 중 자막 아래에 반투명 캡슐 색면을 까는 옵션. (설정 Appearance)
     let subtitleBackdropWhilePeeking: Bool
     let backgroundStyleLabel: String?
@@ -1082,7 +1159,7 @@ private struct DotsOverlayView: View {
             if layout.isCornerMasked(ct.x, ct.y) { return }
             let rect = CGRect(x: ct.x - layout.half, y: ct.y - layout.half, width: dotD, height: dotD)
                 .insetBy(dx: -seam, dy: -seam)
-            context.fill(dotShape.path(in: rect), with: .color(color))
+            context.fill(dotShape.path(in: rect, row: row, col: col, randomRotation: dotRandomRotation), with: .color(color))
         }
         switch finger.marker {
         case .found:
@@ -1266,7 +1343,7 @@ private struct DotsOverlayView: View {
                             .insetBy(dx: -seam, dy: -seam)
                         // 깜빡임이 꺼진 위상에서도 앵커는 계속 보여야 한다 — 피크를 되돌릴
                         // 유일한 표적이라서 사라지면 안 된다.
-                        context.fill(dotShape.path(in: dotRect),
+                        context.fill(dotShape.path(in: dotRect, row: rowIdx, col: colIdx, randomRotation: dotRandomRotation),
                                      with: .color(hasOverlay && isBlinkOn ? blinkColor : indicatorColorPlay))
                         continue
                     }
@@ -1280,7 +1357,7 @@ private struct DotsOverlayView: View {
                        !shouldHideDot(at: c, rect: rightBlockHideRect, half: layout.half) {
                         let dotRect = CGRect(x: c.x - layout.half, y: c.y - layout.half, width: dotD, height: dotD)
                             .insetBy(dx: -seam, dy: -seam)
-                        context.fill(dotShape.path(in: dotRect), with: .color(blinkColor))
+                        context.fill(dotShape.path(in: dotRect, row: rowIdx, col: colIdx, randomRotation: dotRandomRotation), with: .color(blinkColor))
                     }
                     continue
                 }
@@ -1297,7 +1374,7 @@ private struct DotsOverlayView: View {
                     effect: effect, hasOverlay: hasOverlay, isBlinkOn: isBlinkOn,
                     placeholderColor: placeholderColor
                 )
-                context.fill(dotShape.path(in: dotRect), with: .color(color))
+                context.fill(dotShape.path(in: dotRect, row: rowIdx, col: colIdx, randomRotation: dotRandomRotation), with: .color(color))
             }
         }
 
@@ -1955,6 +2032,7 @@ struct ContentView: View {
     @AppStorage("autoResizeWindowToVideo") private var autoResizeWindowToVideo = true
     @AppStorage("adaptiveSubtitleColor") private var adaptiveSubtitleColor = true
     @AppStorage(DotShape.storageKey) private var dotShapeRaw = DotShape.defaultChoice.rawValue
+    @AppStorage(DotShape.randomRotationKey) private var dotRandomRotation = DotShape.randomRotationDefault
     // 자동 생성 자막 설정 — 값이 바뀌면 generator 에 그대로 밀어 넣는다.
     @AppStorage(SubtitleDefaults.autoGenerate)     private var autoGenerateSubtitles = false
     @AppStorage(SubtitleDefaults.sourceLanguage)   private var subtitleSourceLanguage = SubtitleDefaults.defaultSourceLanguage
@@ -2335,6 +2413,7 @@ struct ContentView: View {
                 fullscreenBackgroundStyle: fullscreenBackgroundStyle,
                 adaptiveSubtitleColor: adaptiveSubtitleColor,
                 dotShape: dotShape,
+                dotRandomRotation: dotRandomRotation,
                 subtitleBackdropWhilePeeking: subtitleBackdropWhilePeeking,
                 backgroundStyleLabel: backgroundStyleLabel,
                 isEditingURL: isEditingURL,
@@ -3407,6 +3486,7 @@ struct ContentView: View {
         adaptiveSubtitleColor = true
         accentColorRaw = AppAccentColor.defaultChoice.rawValue
         dotShapeRaw = DotShape.defaultChoice.rawValue
+        dotRandomRotation = DotShape.randomRotationDefault
         backgroundStyleRaw = BackgroundStyle.blur.rawValue
         fullscreenBackgroundStyleRaw = FullscreenBackgroundStyle.black.rawValue
         lastMediaKind = ""
@@ -3684,7 +3764,9 @@ struct ContentView: View {
                 // 각자 그리면 화면만 사각형이고 내보낸 PNG 는 원으로 남는다.
                 ctx.addPath(dotShape.path(in: CGRect(x: cx - r, y: cy - r,
                                                      width: r * 2, height: r * 2)
-                                             .insetBy(dx: -seam, dy: -seam)).cgPath)
+                                             .insetBy(dx: -seam, dy: -seam),
+                                          row: row, col: col,
+                                          randomRotation: dotRandomRotation, yUp: true).cgPath)
                 ctx.fillPath()
             }
         }

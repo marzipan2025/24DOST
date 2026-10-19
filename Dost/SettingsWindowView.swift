@@ -247,6 +247,7 @@ struct SettingsRow<Content: View>: View {
     let content: Content
     let showDivider: Bool
     let extraVerticalPadding: CGFloat
+    @Environment(\.isEnabled) private var isEnabled
     
     init(
         _ label: String,
@@ -281,6 +282,8 @@ struct SettingsRow<Content: View>: View {
                 Spacer(minLength: 12)
                 content
             }
+            // 꺼진 항목은 글자와 컨트롤만 흐린다 — 구분선까지 흐리면 줄이 끊겨 보인다.
+            .opacity(isEnabled ? 1 : 0.35)
             .padding(.vertical, 10 + extraVerticalPadding)
 
             if showDivider {
@@ -327,6 +330,7 @@ struct GeneralSettingsView: View {
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
     @AppStorage(FingerTilt.enabledKey) private var motionSensing = true
     @AppStorage(DotShape.storageKey) private var dotShapeRaw = DotShape.defaultChoice.rawValue
+    @AppStorage(DotShape.randomRotationKey) private var dotRandomRotation = DotShape.randomRotationDefault
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @State private var isResetConfirmationVisible = false
     @State private var isCacheClearConfirmationVisible = false
@@ -369,6 +373,12 @@ struct GeneralSettingsView: View {
                         }
                     }
                 }
+                // 원은 돌려도 같은 모양이라 켤 이유가 없다. 숨기지 않고 흐리게 두는 건
+                // 모양을 바꿀 때마다 아래 항목이 들썩이지 않게 하려는 것이다.
+                SettingsRow("Random Rotation") {
+                    OnOffToggle(isOn: $dotRandomRotation)
+                }
+                .disabled(!DotShape.choice(for: dotShapeRaw).supportsRotation)
                 SettingsRow("Accent Color", showDivider: false) {
                     HStack(spacing: 10) {
                         ForEach(AppAccentColor.allCases) { choice in
