@@ -306,7 +306,6 @@ class VideoSampler: ObservableObject {
     // 점 크기/간격 (w,s,a,d,z 키로 조절)
     // 제약: dotDiameter ≥ 8, gridSize ≥ dotDiameter + minGap
     //       (gap = gridSize − dotDiameter ≥ 0 → 점끼리 맞붙는 것까지 허용)
-    //       사각형이 맞붙을 때 생기는 이음매는 DotShape.seamOutset 이 지운다.
     // 마지막 값은 UserDefaults에 저장되어 다음 실행 시 복원. z 초기화는 기본값으로 되돌림.
     private let defaultGridSize: CGFloat = 40
     private let defaultDotDiameter: CGFloat = 16

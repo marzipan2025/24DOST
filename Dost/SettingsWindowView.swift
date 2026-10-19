@@ -330,7 +330,6 @@ struct GeneralSettingsView: View {
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
     @AppStorage(FingerTilt.enabledKey) private var motionSensing = true
     @AppStorage(DotShape.storageKey) private var dotShapeRaw = DotShape.defaultChoice.rawValue
-    @AppStorage(DotShape.randomRotationKey) private var dotRandomRotation = DotShape.randomRotationDefault
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @State private var isResetConfirmationVisible = false
     @State private var isCacheClearConfirmationVisible = false
@@ -373,12 +372,6 @@ struct GeneralSettingsView: View {
                         }
                     }
                 }
-                // 원은 돌려도 같은 모양이라 켤 이유가 없다. 숨기지 않고 흐리게 두는 건
-                // 모양을 바꿀 때마다 아래 항목이 들썩이지 않게 하려는 것이다.
-                SettingsRow("Random Rotation") {
-                    OnOffToggle(isOn: $dotRandomRotation)
-                }
-                .disabled(!DotShape.choice(for: dotShapeRaw).supportsRotation)
                 SettingsRow("Accent Color", showDivider: false) {
                     HStack(spacing: 10) {
                         ForEach(AppAccentColor.allCases) { choice in
