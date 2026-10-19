@@ -345,10 +345,12 @@ enum DotShape: String, CaseIterable, Identifiable {
     /// 인접한 두 사각형이 경계를 정확히 공유하면 격자 원점이 소수점이라 그 경계가 픽셀
     /// 한가운데 걸린다. 각자 절반씩 덮은 걸 합성하면 75% 만 차서 **배경색 격자선이 옅게
     /// 비친다.** 살짝 키워 겹쳐 그리면 사라진다. 원은 접점에서만 닿아 해당이 없고,
-    /// 간격이 1 이상 남아 있으면 겹칠 일이 없으므로 0 이다.
-    func seamOutset(gridSize: CGFloat, dotDiameter: CGFloat) -> CGFloat {
+    /// 간격이 1 이상 남아 있으면 겹칠 일이 없으므로 0 이다. 랜덤 회전 중에는 사각형이
+    /// 도트 크기 원 안으로 들어가 맞붙지 않으므로 역시 0 이다 — 키우면 모서리가 이웃에 닿는다.
+    func seamOutset(gridSize: CGFloat, dotDiameter: CGFloat, randomRotation: Bool) -> CGFloat {
         // 3:2 직사각형도 가로로는 정사각형처럼 맞붙는다.
-        guard self == .square || self == .rectangle, gridSize - dotDiameter <= 0 else { return 0 }
+        guard self == .square || self == .rectangle, !randomRotation,
+              gridSize - dotDiameter <= 0 else { return 0 }
         return 0.5
     }
 
@@ -379,15 +381,18 @@ enum DotShape: String, CaseIterable, Identifiable {
         switch self {
         case .circle:
             return path(in: rect)
+        // 돌린 사각형은 **꼭짓점이 도트 크기 원에 닿게** 줄인다(별과 같은 기준). 한 변을
+        // 그대로 두면 모서리가 틀 밖으로 나가 간격에 따라 이웃과 겹치기도, 머리카락만큼
+        // 떨어지기도 해 애매해진다. 원 안에 들면 간격이 0 이어도 이웃과 만나지 않고,
+        // 크기는 각도와 상관없이 모두 같다.
         case .square:
-            // 사각형은 90° 마다 제 모양으로 돌아온다. 한 변은 그대로라 돌린 모서리는
-            // 틀(rect) 밖으로 최대 √2 배까지 나간다 — 크기를 원·별과 맞추는 쪽을 택했다.
+            // 사각형은 90° 마다 제 모양으로 돌아온다.
             let a = unit * .pi / 2
-            return Self.boxPath(in: rect, aspect: 1, rotation: yUp ? -a : a)
+            return Self.boxPath(in: rect, aspect: 1, rotation: yUp ? -a : a, inCircle: true)
         case .rectangle:
             // 직사각형은 180° 마다 제 모양으로 돌아온다.
             let a = unit * .pi
-            return Self.rectanglePath(in: rect, rotation: yUp ? -a : a)
+            return Self.boxPath(in: rect, aspect: 2.0 / 3.0, rotation: yUp ? -a : a, inCircle: true)
         case .star:
             return Self.starPath(in: rect, rotation: unit * 2 * Self.starHalfStep, yUp: yUp)
         }
@@ -409,9 +414,12 @@ enum DotShape: String, CaseIterable, Identifiable {
     }
 
     /// 중심을 축으로 `rotation` 만큼 돌린 직사각형. 가로는 `rect` 의 짧은 변,
-    /// 세로는 그 `aspect` 배다(1 이면 정사각형).
-    private static func boxPath(in rect: CGRect, aspect: CGFloat, rotation: CGFloat) -> Path {
-        let w = min(rect.width, rect.height) / 2
+    /// 세로는 그 `aspect` 배다(1 이면 정사각형). `inCircle` 이면 가로 대신 대각선을
+    /// 짧은 변에 맞춰, 어느 각도로 돌려도 `rect` 의 내접원 밖으로 나가지 않는다.
+    private static func boxPath(in rect: CGRect, aspect: CGFloat, rotation: CGFloat,
+                                inCircle: Bool = false) -> Path {
+        let r = min(rect.width, rect.height) / 2
+        let w = inCircle ? r / (1 + aspect * aspect).squareRoot() : r
         let h = w * aspect
         let center = CGPoint(x: rect.midX, y: rect.midY)
         let c = cos(rotation), s = sin(rotation)
@@ -1186,7 +1194,8 @@ private struct DotsOverlayView: View {
         let dotD = sampler.dotDiameter
         // 간격 0 인 사각형만 값이 붙는다. 세 군데 도트가 모두 같은 사각형을 써야
         // 앵커·테두리 도트만 이음매가 남는 일이 없다.
-        let seam = dotShape.seamOutset(gridSize: grid, dotDiameter: dotD)
+        let seam = dotShape.seamOutset(gridSize: grid, dotDiameter: dotD,
+                                       randomRotation: dotRandomRotation)
 
         // 그리드 차원 결정
         let rows = sampler.dotColors.count
@@ -3751,7 +3760,8 @@ struct ContentView: View {
 
         let r = dotD / 2 * scale
         // 화면과 같은 규칙 — 내보낸 PNG 에만 격자선이 남으면 안 된다.
-        let seam = dotShape.seamOutset(gridSize: grid, dotDiameter: dotD) * scale
+        let seam = dotShape.seamOutset(gridSize: grid, dotDiameter: dotD,
+                                       randomRotation: dotRandomRotation) * scale
         for row in 1..<(rows - 1) {
             let line = sampler.dotColors[row]
             guard line.count == cols else { continue }
