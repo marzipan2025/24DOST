@@ -2017,6 +2017,9 @@ struct ContentView: View {
     }
     /// 우상단 도트를 누르고 있는 동안 true. onChanged가 연속 발생하므로 idempotent하게 갱신.
     @State private var isPeeking = false
+    /// 지금 피크가 두 손바닥(모션 감지)으로 켜진 것인지. 손바닥을 내려 끌 때 마우스·탭으로 켠
+    /// 피크까지 끄지 않으려고 따로 든다.
+    @State private var isPalmPeek = false
     /// 피크 도트 한 칸의 화면 좌표(캔버스 기준, 좌상단 원점).
     @State private var peekDotRect: CGRect = .zero
     /// 롤아웃 감시용 마우스 이동 모니터.
@@ -3246,6 +3249,23 @@ struct ContentView: View {
         }
     }
 
+    /// 두 손바닥을 들고 있는 동안만 피크(§7.5). 도트로 보고 있을 때만 켠다 — 이미 마우스·탭으로
+    /// 피크 중이면 건드리지 않고, 내릴 때도 손바닥으로 켠 피크만 끈다.
+    ///
+    /// **끌 때 멈추지 않는다** — 다른 피크(`peekEnd` 가 늘 멈춤)와 다르다. 손을 들었다 내리는 건
+    /// 보다가 잠깐 들여다보는 동작이라, 내리자마자 멈추면 도로 재생해야 한다.
+    private func palmPeek(_ on: Bool) {
+        if on {
+            guard !isPeeking, canPeek, isFullscreen else { return }
+            isPalmPeek = true
+            isPeeking = true
+            sampler.peekStart()
+        } else if isPalmPeek {
+            isPalmPeek = false
+            isPeeking = false
+        }
+    }
+
     private func togglePeek() {
         if isPeeking {
             endPeekIfNeeded()
@@ -3280,6 +3300,7 @@ struct ContentView: View {
 
     private func endPeekIfNeeded() {
         stopPeekRolloutWatch()
+        isPalmPeek = false
         guard isPeeking else { return }
         isPeeking = false
         sampler.peekEnd()
@@ -4033,6 +4054,7 @@ struct ContentView: View {
     private func applyMotionSensing() {
         if isFullscreen && motionSensing {
             let size = hostWindow?.screen?.frame.size ?? sampler.currentDisplaySize
+            FingerTilt.shared.onPalmPeek = { on in palmPeek(on) }
             FingerTilt.shared.start(screenSize: size, sampler: sampler)
         } else {
             FingerTilt.shared.stop()
