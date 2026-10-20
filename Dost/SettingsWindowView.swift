@@ -736,7 +736,8 @@ struct ShortcutsSettingsView: View {
         .init(input: "Top-Left Dot", action: "Quit the app"),
         .init(input: "Peek Dot", action: "Hold to peek, or tap-toggle when Tap to Peek is on"),
         .init(input: "Tilt Index Finger", action: "Rewind or fast-forward 5 s per second in fullscreen (camera)"),
-        .init(input: "Index + Middle Finger", action: "Rewind or fast-forward 30 s per second while tilting")
+        .init(input: "Index + Middle Finger", action: "Rewind or fast-forward 30 s per second while tilting"),
+        .init(input: "Open Hand", action: "Peek; turn it sideways to rewind or fast-forward 5 s per second")
     ]
 
     var body: some View {

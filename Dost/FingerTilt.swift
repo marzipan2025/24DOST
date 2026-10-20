@@ -15,17 +15,21 @@ import Vision
 /// 빠르게(중지까지 폄)는 두 도트 모두 액센트이고 진행 방향 도트만 깜빡인다.
 ///
 /// **손바닥 피크**: 손을 펴서(검지~새끼 네 손가락이 다 펴짐) 0.2초 보이고 있으면 그 동안만 피크로 바꾼다
-/// (`onPalmPeek`). 그 동안은 검지 기울이기로 옮기지 않고 손끝 도트도 그리지 않는다 — 편 손은 검지·중지도
-/// 펴져 있어 기울면 그대로 빠른 탐색이 돼 버린다. 빠른 탐색(검지·중지만 폄)과는 약지·새끼가 펴졌는지로
-/// 갈린다. 손바닥을 0.3초 넘게 놓치면 끝난다.
+/// (`onPalmPeek`). 손바닥을 0.3초 넘게 놓치면 끝난다. 손바닥이 보이거나 피크 중인 동안(손바닥 모드)은
+/// 검지 기울기만 보고 1초에 5초씩 옮기되 **70~110도**(거의 옆으로 눕힘)일 때만이다. 편 손은 중지도 펴져
+/// 있어 두 손가락과 가를 수 없으니 빠른 탐색은 없고, 범위를 좁혀 손을 들어 올리다 스친 기울기를 거른다.
+/// 손끝 도트도 옮기는 동안에만 그린다 — 피크로 영상을 보는 중에 손을 따라 도트가 다니면 가린다.
+/// 손바닥 모드는 한 번 들어오면 **손이 화면에서 사라질 때까지** 이어진다. 편 손을 옆으로 눕히면 약지·새끼가
+/// 가려져 손바닥 판정이 끊기기 쉬운데, 그때 평소 규칙으로 넘어가면 펴 있는 중지 때문에 빠른 탐색이 켜진다.
 final class FingerTilt: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     static let shared = FingerTilt()
 
-    private static let tiltThreshold: Double = 30 // 위를 가리킨 데서 몇 도 넘게 기울면 옮기나
-    private static let maxTilt: Double = 150      // 이보다 더 기울면(아래를 가리킴) 옮기지 않는다
+    // 위를 가리킨 데서 이만큼 기울면 옮긴다. 위쪽 끝을 넘으면 아래를 가리키는 것이라 옮기지 않는다.
+    private static let tiltRange: ClosedRange<Double> = 30...150
+    private static let palmTiltRange: ClosedRange<Double> = 70...110   // 손바닥 모드
     private static let maxBend: Double = 30        // 두 마디(둘째·첫째 마디)가 꺾인 각도의 합이 이 이하면 펴진 것
     private static let speed: Double = 5           // 옮기는 동안 1초에 몇 초씩 옮기나
-    private static let fastSpeed: Double = 30      // 중지도 펴 있을 때
+    private static let fastSpeed: Double = 30      // 중지도 펴 있을 때(손바닥 모드엔 없음)
     private static let releaseDelay: Double = 0.15    // 잠깐(한두 장면) 놓친 것은 이어 간다
     private static let palmHold: Double = 0.2         // 손바닥이 이만큼 이어져 보여야 피크를 켠다(지나가는 손 거르기)
     private static let palmRelease: Double = 0.3      // 손바닥을 이만큼 넘게 놓쳐야 피크를 끈다(깜빡임 거르기)
@@ -61,21 +65,20 @@ final class FingerTilt: NSObject, ObservableObject, AVCaptureVideoDataOutputSamp
     private var screenSize = CGSize.zero          // queue 에서 읽는다(start 에서만 바꾼다)
     private var filters: [OneEuro] = []           // 검지 관절 넷의 떨림 거르개(queue 에서만)
     private var lastFound: CFTimeInterval = 0     // queue 에서만
-    private var middleFilters: [OneEuro] = []     // 중지 관절 넷의 떨림 거르개(queue 에서만)
-    private var middleLastFound: CFTimeInterval = 0
 
     /// 한 장면에서 본 검지
     private struct Finger {
         var tip: CGPoint                          // 손끝(창 안 0~1 비율, 위가 0)
         var bend: Double                          // 굽힘: 두 마디에서 꺾인 각도의 합(도, 0 = 곧게 폄)
         var tilt: Double                          // 위 = 0도, 화면 오른쪽이 +, 왼쪽이 −
-        var middleExtended: Bool                  // 중지도 펴 있는지
+        var fast: Bool                            // 중지도 펴 있는지(빠른 탐색)
     }
 
     /// 한 장면에서 본 것: 기울이기에 쓸 검지와, 손바닥을 펴 보이는지
     private struct Seen {
         var finger: Finger?
         var palm: Bool
+        var hand: Bool                            // 손을 찾았는지(손바닥 모드를 풀 때 본다)
     }
 
     // 아래는 메인 스레드에서만
@@ -88,6 +91,8 @@ final class FingerTilt: NSObject, ObservableObject, AVCaptureVideoDataOutputSamp
     private var palmsSince: CFTimeInterval?       // 손바닥이 이어 보이기 시작한 때
     private var palmsLost: CFTimeInterval?        // 피크 중 손바닥을 놓친 때
     private var isPalmPeeking = false
+    private var palmHeld = false                  // 손바닥 모드를 손이 사라질 때까지 붙잡아 둔다
+    private var handLost: CFTimeInterval?         // 손바닥 모드 중 손을 놓친 때
 
     // MARK: - 켜고 끄기
 
@@ -120,6 +125,8 @@ final class FingerTilt: NSObject, ObservableObject, AVCaptureVideoDataOutputSamp
         releasedSince = nil
         palmsSince = nil
         palmsLost = nil
+        palmHeld = false
+        handLost = nil
         if isPalmPeeking { isPalmPeeking = false; onPalmPeek?(false) }
         let s = session
         session = nil
@@ -175,8 +182,11 @@ final class FingerTilt: NSObject, ObservableObject, AVCaptureVideoDataOutputSamp
         }
 
         let hand0 = handRequest.results?.first
-        // 손바닥: 검지~새끼 네 손가락이 모두 펴짐. 엄지는 보지 않는다(카메라를 향하면 자주 가려진다).
-        let palm = hand0.map { Self.isOpenPalm($0, place) } ?? false
+        // 검지~새끼의 펴짐을 한 번에 보고 손바닥 판정과 빠른 탐색 판정이 나눠 쓴다.
+        // 엄지는 보지 않는다(카메라를 향하면 자주 가려진다).
+        let ext = hand0.map { Self.extendedFingers($0, place) } ?? [nil, nil, nil, nil]
+        let palm = ext.allSatisfy { $0 == true }
+        let fast = ext[1] == true
 
         var seen: Finger?
         if let hand = hand0 {
@@ -192,45 +202,33 @@ final class FingerTilt: NSObject, ObservableObject, AVCaptureVideoDataOutputSamp
                 lastFound = now
                 let pts = (0..<4).map { filters[$0].filter(raw[$0], at: now) }
                 // 굽힘: 둘째 마디와 첫째 마디에서 앞 마디 방향이 얼마나 꺾였는지의 합.
-                // (곧은 거리 ÷ 마디 길이 합은 고르게 60도쯤 휘어도 94% 가 나와 굽힘을 잘 못 가려서 쓰지 않는다)
-                func turn(_ a: SIMD2<Double>, _ b: SIMD2<Double>, _ c: SIMD2<Double>) -> Double {
-                    let u = b - a, v = c - b
-                    let n = simd_length(u) * simd_length(v)
-                    return n > 0 ? acos(min(max(simd_dot(u, v) / n, -1), 1)) * 180 / .pi : 0
-                }
-                let bend = turn(pts[0], pts[1], pts[2]) + turn(pts[1], pts[2], pts[3])
+                let bend = Self.turn(pts[0], pts[1], pts[2]) + Self.turn(pts[1], pts[2], pts[3])
                 // 기울기: 뿌리 → 손끝 방향. 화면은 위가 0 이라 y 를 뒤집는다.
                 let d = pts[3] - pts[0]
                 let tilt = atan2(d.x, -d.y) * 180 / .pi
-                // 중지: 검지와 같은 굽힘 기준(30도 이하)에 더해, 손끝이 둘째 마디보다 손목에서 확실히 멀어야 펴진 것.
-                // (주먹 쥔 중지는 뿌리 마디에서 접혀 둘째·첫째 마디만 보면 곧게 보일 수 있다)
-                var middle = false
-                let mNames: [VNHumanHandPoseObservation.JointName] = [.middleMCP, .middlePIP, .middleDIP, .middleTip]
-                let mRaw = mNames.compactMap { n -> SIMD2<Double>? in
-                    guard let q = try? hand.recognizedPoint(n), q.confidence > 0.3 else { return nil }
-                    return place(q.location)
-                }
-                if mRaw.count == 4, let wq = try? hand.recognizedPoint(.wrist), wq.confidence > 0.3 {
-                    if middleFilters.count != 4 || now - middleLastFound > 0.3 { middleFilters = (0..<4).map { _ in OneEuro() } }
-                    middleLastFound = now
-                    let m = (0..<4).map { middleFilters[$0].filter(mRaw[$0], at: now) }
-                    let wrist = place(wq.location)
-                    middle = turn(m[0], m[1], m[2]) + turn(m[1], m[2], m[3]) <= Self.maxBend
-                        && simd_distance(wrist, m[3]) > simd_distance(wrist, m[1]) * 1.15
-                }
                 let tipPoint = CGPoint(x: pts[3].x / Double(sw), y: pts[3].y / Double(sh))
-                seen = Finger(tip: tipPoint, bend: bend, tilt: tilt, middleExtended: middle)
+                seen = Finger(tip: tipPoint, bend: bend, tilt: tilt, fast: fast)
             }
         }
-        let result = Seen(finger: seen, palm: palm)
+        let result = Seen(finger: seen, palm: palm, hand: hand0 != nil)
         Task { @MainActor [weak self] in self?.handle(result) }
     }
 
-    /// 펴진 손가락: 두 마디의 굽힘 합 ≤ 30° 이고 손끝이 둘째 마디보다 손목에서 1.15배 멀다(중지와 같은 기준).
-    /// 손바닥 판정은 한 장면만 보고 하므로 떨림 거르개를 쓰지 않는다 — 켜고 끄는 시간 여유가 대신 거른다.
-    private static func isOpenPalm(_ hand: VNHumanHandPoseObservation,
-                                   _ place: (CGPoint) -> SIMD2<Double>) -> Bool {
-        guard let wq = try? hand.recognizedPoint(.wrist), wq.confidence > 0.3 else { return false }
+    /// 앞 마디 방향이 b 에서 얼마나 꺾였는지(도). 곧으면 0.
+    /// (곧은 거리 ÷ 마디 길이 합은 고르게 60도쯤 휘어도 94% 가 나와 굽힘을 잘 못 가려서 쓰지 않는다)
+    private static func turn(_ a: SIMD2<Double>, _ b: SIMD2<Double>, _ c: SIMD2<Double>) -> Double {
+        let u = b - a, v = c - b
+        let n = simd_length(u) * simd_length(v)
+        return n > 0 ? acos(min(max(simd_dot(u, v) / n, -1), 1)) * 180 / .pi : 0
+    }
+
+    /// 검지·중지·약지·새끼 순으로 펴졌는지. 손목이나 그 손가락 관절을 못 찾으면 nil(모름).
+    /// 펴짐: 두 마디의 굽힘 합 ≤ 30° 이고 손끝이 둘째 마디보다 손목에서 1.15배 멀다
+    /// (주먹 쥔 손가락은 뿌리 마디에서 접혀 둘째·첫째 마디만 보면 곧게 보일 수 있어 거리도 본다).
+    /// 한 장면만 보고 하므로 떨림 거르개를 쓰지 않는다 — 손바닥 피크는 켜고 끄는 시간 여유가 대신 거른다.
+    private static func extendedFingers(_ hand: VNHumanHandPoseObservation,
+                                        _ place: (CGPoint) -> SIMD2<Double>) -> [Bool?] {
+        guard let wq = try? hand.recognizedPoint(.wrist), wq.confidence > 0.3 else { return [nil, nil, nil, nil] }
         let wrist = place(wq.location)
         let fingers: [[VNHumanHandPoseObservation.JointName]] = [
             [.indexMCP, .indexPIP, .indexDIP, .indexTip],
@@ -238,17 +236,12 @@ final class FingerTilt: NSObject, ObservableObject, AVCaptureVideoDataOutputSamp
             [.ringMCP, .ringPIP, .ringDIP, .ringTip],
             [.littleMCP, .littlePIP, .littleDIP, .littleTip],
         ]
-        func turn(_ a: SIMD2<Double>, _ b: SIMD2<Double>, _ c: SIMD2<Double>) -> Double {
-            let u = b - a, v = c - b
-            let n = simd_length(u) * simd_length(v)
-            return n > 0 ? acos(min(max(simd_dot(u, v) / n, -1), 1)) * 180 / .pi : 0
-        }
-        return fingers.allSatisfy { names in
+        return fingers.map { names -> Bool? in
             let p = names.compactMap { n -> SIMD2<Double>? in
                 guard let q = try? hand.recognizedPoint(n), q.confidence > 0.3 else { return nil }
                 return place(q.location)
             }
-            guard p.count == 4 else { return false }
+            guard p.count == 4 else { return nil }
             return turn(p[0], p[1], p[2]) + turn(p[1], p[2], p[3]) <= maxBend
                 && simd_distance(wrist, p[3]) > simd_distance(wrist, p[1]) * 1.15
         }
@@ -261,26 +254,32 @@ final class FingerTilt: NSObject, ObservableObject, AVCaptureVideoDataOutputSamp
         guard isRunning else { return }
         let now = CACurrentMediaTime()
         updatePalmPeek(result.palm, now: now)
-        // 손바닥이 보이거나(켜지기 전 0.2초 포함) 피크 중이면 기울이기를 쉰다. 편 손은 검지·중지도
-        // 펴져 있어서, 이걸 빼면 손을 들어 올리며 기울어진 순간 빠른 탐색이 시작된다.
-        if result.palm || isPalmPeeking {
-            tip = nil
-            if marker != .found { marker = .found }
-            direction = 0
-            releasedSince = nil
-            return
+        // 손바닥 모드: 손바닥을 한 번이라도 보면(피크가 켜지기 전 0.2초 포함) 들어가고, 손을 0.3초 넘게
+        // 놓쳐야 나온다. 피크가 켜지기 전부터 넣어야 편 손을 들어 올리다 기운 순간 넓은 범위·빠른 탐색으로
+        // 옮겨지지 않는다. 손바닥 판정이 끊겨도 같은 손이 보이는 동안은 이어 간다.
+        if result.palm { palmHeld = true }
+        if result.hand {
+            handLost = nil
+        } else if palmHeld {
+            if handLost == nil { handLost = now }
+            if let t = handLost, now - t > Self.palmRelease { palmHeld = false; handLost = nil }
         }
+        let palmMode = palmHeld || isPalmPeeking
+        let range = palmMode ? Self.palmTiltRange : Self.tiltRange
         let seen = result.finger
         var want = 0
+        var fast = false
         var newMarker = Marker.found
         if let f = seen, f.bend <= Self.maxBend {
             newMarker = .straight
-            if abs(f.tilt) >= Self.tiltThreshold, abs(f.tilt) <= Self.maxTilt {
+            if range.contains(abs(f.tilt)) {
                 want = f.tilt < 0 ? -1 : 1
-                newMarker = .moving(want, fast: f.middleExtended)
+                fast = !palmMode && f.fast
+                newMarker = .moving(want, fast: fast)
             }
         }
-        tip = seen?.tip
+        // 손바닥 모드에선 옮기는 동안에만 손끝 도트를 그린다.
+        tip = palmMode && want == 0 ? nil : seen?.tip
         if marker != newMarker { marker = newMarker }
         guard let v = sampler else { return }
         if want != 0 {
@@ -295,7 +294,7 @@ final class FingerTilt: NSObject, ObservableObject, AVCaptureVideoDataOutputSamp
             let dt = min(now - lastMove, 0.2)
             lastMove = now
             // 빠르기는 장면마다 그때의 중지로 정한다(옮기는 도중 중지를 펴고 접어도 자리는 이어진다)
-            let speed = seen?.middleExtended == true ? Self.fastSpeed : Self.speed
+            let speed = fast ? Self.fastSpeed : Self.speed
             position += (Double(direction) * speed + (v.isPlaying ? 1 : 0)) * dt
             position = min(max(position, 0), max(v.durationSeconds - 0.25, 0))
             v.scrub(toSeconds: position)
